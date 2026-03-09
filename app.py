@@ -629,55 +629,51 @@ if selected == "대시보드":
 
         recent = df.sort_values('last_updated', ascending=False).head(10)
 
-        table_html = '<table class="data-tbl"><thead><tr>'
-        table_html += '<th style="width:25%;">문서 정보</th><th style="width:20%;">시험 유형</th><th style="width:15%;">상태</th><th style="width:15%;">진행률</th><th style="width:25%;">업데이트</th>'
-        table_html += '</tr></thead><tbody>'
+        status_kr = {
+            "Ready": "대기", "Extracting": "추출중", "Verifying": "검증중",
+            "Converting": "변환중", "Extracted": "추출완료", "Modified": "수정됨",
+            "Done": "완료", "Stopped": "중단", "Stopping": "중단중", "Error": "오류"
+        }
 
+        table_rows = []
         for _, row in recent.iterrows():
-            prog = row.get('progress', 0)
-            prog_bar = f'<div style="background:#e9ecef;border-radius:4px;height:8px;width:100%;"><div style="background:linear-gradient(135deg,#667eea,#764ba2);border-radius:4px;height:8px;width:{prog}%;"></div></div><span style="font-size:0.75rem;color:#6c757d;">{prog}%</span>'
-
-            # 문서 정보: 연도 + 월/학기 + 학년 + 과목
-            year = row.get('year', '') or ''
-            month = row.get('month', '') or ''
-            semester = row.get('semester', '') or ''
-            grade = row.get('grade', '') or ''
-            subject = row.get('subject', '') or ''
-
-            time_info = f"{month}월" if month else semester
-            doc_info = f"{year} {time_info} {grade} {subject}".strip()
+            year_val = row.get('year', '') or ''
+            month_val = row.get('month', '') or ''
+            semester_val = row.get('semester', '') or ''
+            grade_val = row.get('grade', '') or ''
+            subject_val = row.get('subject', '') or ''
+            time_info = f"{month_val}월" if month_val else semester_val
+            doc_info = f"{year_val} {time_info} {grade_val} {subject_val}".strip()
             if not doc_info:
                 doc_info = row.get('filename', '-')
 
-            # 시험 유형: 유형 + 학교명
-            exam_type = row.get('exam_type', '') or ''
-            school = row.get('school', '') or ''
-            exam_info = f"{exam_type}"
-            if school:
-                exam_info += f"<br><span style='font-size:0.75rem;color:#6c757d;'>{school}</span>"
+            exam_type_val = row.get('exam_type', '') or ''
+            school_val = row.get('school', '') or ''
+            exam_info = f"{exam_type_val} {school_val}".strip() if school_val else exam_type_val
 
-            # 업데이트 시간 포맷
-            last_updated = row.get('last_updated', '-')
-            if last_updated and last_updated != '-':
-                # 날짜와 시간 분리
-                date_part = last_updated.split(' ')[0] if ' ' in last_updated else last_updated
-                time_part = last_updated.split(' ')[1] if ' ' in last_updated else ''
-                update_html = f"{date_part}<br><span style='font-size:0.75rem;color:#6c757d;'>{time_part}</span>"
-            else:
-                update_html = '-'
+            table_rows.append({
+                "문서": doc_info,
+                "파일명": row.get('filename', '-'),
+                "시험유형": exam_info,
+                "상태": status_kr.get(row.get('status', 'Ready'), row.get('status', '')),
+                "진행률": int(row.get('progress', 0)),
+                "업데이트": row.get('last_updated', '-'),
+            })
 
-            table_html += f'''
-            <tr>
-                <td><strong>{doc_info}</strong><br><span style="font-size:0.75rem;color:#9ca3af;">{row.get('filename', '-')}</span></td>
-                <td>{exam_info}</td>
-                <td>{get_status_badge(row.get('status', 'Ready'))}</td>
-                <td>{prog_bar}</td>
-                <td>{update_html}</td>
-            </tr>
-            '''
-
-        table_html += '</tbody></table>'
-        st.markdown(table_html, unsafe_allow_html=True)
+        display_df = pd.DataFrame(table_rows)
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "문서": st.column_config.TextColumn("문서", width="medium"),
+                "파일명": st.column_config.TextColumn("파일명", width="medium"),
+                "시험유형": st.column_config.TextColumn("시험유형", width="small"),
+                "상태": st.column_config.TextColumn("상태", width="small"),
+                "진행률": st.column_config.ProgressColumn("진행률", min_value=0, max_value=100, width="small"),
+                "업데이트": st.column_config.TextColumn("업데이트", width="medium"),
+            }
+        )
 
     else:
         st.markdown('''
