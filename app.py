@@ -603,24 +603,23 @@ if selected == "대시보드":
         df = pd.DataFrame(db)
 
         total = len(df)
-        ready = len(df[df['status'] == 'Ready'])
-        processing = len(df[df['status'].isin(['Extracting', 'Verifying', 'Converting'])])
-        done = len(df[df['status'] == 'Done'])
+        ready = len(df[df['status'].isin(['Ready', 'Stopped'])])
+        processing = len(df[df['status'].isin(['Extracting', 'Verifying', 'Converting', 'Stopping'])])
+        completed = len(df[df['status'].isin(['Extracted', 'Modified', 'Done'])])
         error = len(df[df['status'] == 'Error'])
-        verified = len([x for x in db if x.get('ai_verified', False)])
 
         # 통계 카드
         cols = st.columns(5)
         with cols[0]:
             st.markdown(render_stat_card(str(total), "전체 문서"), unsafe_allow_html=True)
         with cols[1]:
-            st.markdown(render_stat_card(str(ready), "대기중"), unsafe_allow_html=True)
+            st.markdown(render_stat_card(str(ready), "대기/중단"), unsafe_allow_html=True)
         with cols[2]:
             st.markdown(render_stat_card(str(processing), "처리중"), unsafe_allow_html=True)
         with cols[3]:
-            st.markdown(render_stat_card(str(done), "완료"), unsafe_allow_html=True)
+            st.markdown(render_stat_card(str(completed), "완료"), unsafe_allow_html=True)
         with cols[4]:
-            st.markdown(render_stat_card(str(verified), "검증완료"), unsafe_allow_html=True)
+            st.markdown(render_stat_card(str(error), "오류"), unsafe_allow_html=True)
 
         st.markdown("<div style='height: 2rem;'></div>", unsafe_allow_html=True)
 
