@@ -1196,17 +1196,34 @@ elif selected == "문서 뷰어":
                         'questions': []
                     })
 
+                # passage_id 기반 역색인 (빠른 lookup)
+                pid_to_pm = {}
+                for pm in passage_map:
+                    pid = pm['passage'].get('passage_id')
+                    if pid and pid not in pid_to_pm:
+                        pid_to_pm[pid] = pm
+
                 # 문항을 지문에 매핑
                 for q in sorted(questions, key=lambda x: x.get('q_num', 0)):
                     q_num = q.get('q_num', 0)
+                    q_pid = q.get('passage_id')
                     matched = False
-                    for pm in passage_map:
-                        if pm['q_start'] and pm['q_end']:
-                            if pm['q_start'] <= q_num <= pm['q_end']:
-                                pm['questions'].append(q)
-                                matched = True
-                                break
-                    # 범위 매칭 안되면 같은 페이지 기준
+
+                    # 1차: passage_id 기반 매칭
+                    if q_pid and q_pid in pid_to_pm:
+                        pid_to_pm[q_pid]['questions'].append(q)
+                        matched = True
+
+                    # 2차 fallback: 문항 범위 매칭
+                    if not matched:
+                        for pm in passage_map:
+                            if pm['q_start'] and pm['q_end']:
+                                if pm['q_start'] <= q_num <= pm['q_end']:
+                                    pm['questions'].append(q)
+                                    matched = True
+                                    break
+
+                    # 3차 fallback: 같은 페이지 기준 (하위호환)
                     if not matched:
                         for pm in passage_map:
                             if pm['passage'].get('page_num') == q.get('page_num'):
@@ -1448,7 +1465,7 @@ elif selected == "시험지구성":
                                         'q_stem': q.get('q_stem', ''),
                                         'reference_box': q.get('reference_box', ''),
                                         'choices': [q.get(f'choice_{i}', '') for i in range(1, 6)],
-                                        'passage': next((p for p in passages if p.get('page_num') == q_page), None)
+                                        'passage': next((p for p in passages if q.get('passage_id') and p.get('passage_id') == q.get('passage_id')), None) or next((p for p in passages if p.get('page_num') == q_page), None)
                                     })
                                     st.rerun()
         else:

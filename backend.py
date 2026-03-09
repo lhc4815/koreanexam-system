@@ -169,19 +169,76 @@ def task_extract_json(file_id: str, filepath: str, metadata: dict) -> None:
         update_db_status(file_id, "Error", error_msg=error_msg)
 
 
+def _reassign_passage_ids(passages: list, questions: list) -> tuple:
+    """이미 평탄화된 passages/questions에 passage_id를 재부여.
+
+    passages를 page_num 순 정렬 후 새 ID를 순차 부여.
+    is_continued_from_prev인 passage는 이전 ID를 재사용.
+    questions의 passage_id를 old→new 매핑에 따라 업데이트.
+    """
+    passages.sort(key=lambda p: p.get("page_num", 0))
+
+    counter = 0
+    last_id = None
+    old_to_new = {}  # old_passage_id → new_passage_id
+
+    for p in passages:
+        old_id = p.get("passage_id")
+        if p.get("is_continued_from_prev") and last_id:
+            new_id = last_id
+        else:
+            counter += 1
+            new_id = f"P{counter:03d}"
+        last_id = new_id
+        p["passage_id"] = new_id
+        if old_id and old_id != new_id:
+            old_to_new[old_id] = new_id
+
+    # questions의 passage_id를 매핑에 따라 업데이트
+    for q in questions:
+        q_pid = q.get("passage_id")
+        if q_pid and q_pid in old_to_new:
+            q["passage_id"] = old_to_new[q_pid]
+        elif q_pid is None:
+            # passage_id가 없는 문항: page_num + category로 매칭 시도
+            for p in passages:
+                if p.get("page_num") == q.get("page_num") and p.get("category") == q.get("category"):
+                    q["passage_id"] = p["passage_id"]
+                    break
+
+    return passages, questions
+
+
 def _save_final_json(file_id: str, metadata: dict) -> None:
     """JSONL 로그를 최종 JSON으로 변환 저장 (Firebase 기반)"""
     questions = []
     passages = []
 
     entries = load_jsonl(file_id)
+    # page_num 순으로 정렬하여 passage_id 순차 부여
+    entries.sort(key=lambda e: e.get("page_num", 0))
+
+    passage_counter = 0
+    last_passage_id = None
+
     for entry in entries:
         try:
             if entry.get("status") == "success" and entry.get("data"):
                 for item in entry["data"]:
-                    # 지문 정보
+                    current_passage_id = None
+
+                    # 지문 정보 — passage_id 부여
                     if item.get("passage_content"):
+                        if item.get("is_continued_from_prev") and last_passage_id:
+                            current_passage_id = last_passage_id
+                        else:
+                            passage_counter += 1
+                            current_passage_id = f"P{passage_counter:03d}"
+
+                        last_passage_id = current_passage_id
+
                         passages.append({
+                            "passage_id": current_passage_id,
                             "page_num": entry.get("page_num"),
                             "category": item.get("category", ""),
                             "passage_content": item.get("passage_content", ""),
@@ -189,9 +246,10 @@ def _save_final_json(file_id: str, metadata: dict) -> None:
                             "continues_to_next": item.get("continues_to_next", False)
                         })
 
-                    # 문항 정보
+                    # 문항 정보 — 같은 passage_id 연결
                     for q in item.get("related_questions", []):
                         questions.append({
+                            "passage_id": current_passage_id,
                             "page_num": entry.get("page_num"),
                             "q_num": q.get("q_num"),
                             "category": item.get("category", ""),
@@ -328,6 +386,7 @@ def task_reextract_pages(file_id: str, filepath: str, page_range: str) -> None:
                     # 지문 정보
                     if item.get("passage_content"):
                         passages.append({
+                            "passage_id": None,
                             "page_num": page_num,
                             "category": item.get("category", ""),
                             "passage_content": item.get("passage_content", ""),
@@ -338,6 +397,7 @@ def task_reextract_pages(file_id: str, filepath: str, page_range: str) -> None:
                     # 문항 정보
                     for q in item.get("related_questions", []):
                         questions.append({
+                            "passage_id": None,
                             "page_num": page_num,
                             "q_num": q.get("q_num"),
                             "category": item.get("category", ""),
@@ -361,6 +421,9 @@ def task_reextract_pages(file_id: str, filepath: str, page_range: str) -> None:
         # 문항 번호순으로 정렬
         questions.sort(key=lambda x: (x.get("page_num", 0), x.get("q_num", 0)))
         passages.sort(key=lambda x: x.get("page_num", 0))
+
+        # passage_id 재부여 (병합 후 일관된 ID 부여)
+        passages, questions = _reassign_passage_ids(passages, questions)
 
         # 저장
         data["questions"] = questions
