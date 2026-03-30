@@ -576,7 +576,8 @@ with st.sidebar:
         "데이터 처리": "데이터 처리",
         "데이터 편집": "데이터 편집",
         "문서 뷰어": "문서 뷰어",
-        "시험지구성": "시험지구성"
+        "시험지구성": "시험지구성",
+        "문제은행": "문제은행"
     }
 
     selected = st.radio(
@@ -1640,3 +1641,208 @@ elif selected == "시험지구성":
             st.error(f"PDF 생성 중 오류가 발생했습니다: {str(e)}")
 
     st.markdown('</div>', unsafe_allow_html=True)
+
+
+# =============================================================================
+# 7. 문제은행
+# =============================================================================
+elif selected == "문제은행":
+    st.markdown('''
+    <div class="page-header">
+        <div class="page-title">문제은행</div>
+        <div class="page-desc">수능/모의고사 기출문항을 가져와 문제은행을 구축합니다</div>
+    </div>
+    ''', unsafe_allow_html=True)
+
+    from kice_importer import (
+        fetch_available_files, download_kice_file,
+        convert_kice_to_system, import_from_local_json,
+        import_kice_exam, TYPE_TO_CATEGORY
+    )
+
+    tab1, tab2, tab3 = st.tabs(["KICE 기출 가져오기", "JSON 파일 업로드", "문제은행 현황"])
+
+    # --- 탭 1: KICE 기출 자동 가져오기 ---
+    with tab1:
+        st.markdown("#### KICE 수능 기출 데이터 가져오기")
+        st.info("한국교육과정평가원(KICE) 수능 국어영역 기출문항을 구조화된 데이터로 가져옵니다. (출처: KICE_slayer_AI_Korean)")
+
+        # 이미 가져온 KICE 데이터 확인
+        db = get_db()
+        imported_kice = [d for d in db if d.get("source") == "KICE_slayer_AI_Korean"]
+        imported_filenames = set(d.get("filename", "") for d in imported_kice)
+
+        if imported_kice:
+            st.success(f"이미 가져온 KICE 데이터: {len(imported_kice)}건")
+            for item in imported_kice:
+                st.markdown(f"- **{item.get('year', '')}학년도 {item.get('month', '')}월 수능** (ID: `{item['file_id']}`)")
+
+        st.markdown("---")
+
+        col_fetch, col_status = st.columns([2, 1])
+        with col_fetch:
+            if st.button("GitHub에서 사용 가능한 데이터 조회", use_container_width=True):
+                with st.spinner("GitHub에서 파일 목록 조회 중..."):
+                    files = fetch_available_files()
+                    if files:
+                        st.session_state["kice_available_files"] = files
+                    else:
+                        st.warning("GitHub에서 파일 목록을 가져올 수 없습니다. gh CLI가 인증되어 있는지 확인해주세요.")
+
+        available = st.session_state.get("kice_available_files", [])
+        if available:
+            st.markdown(f"**사용 가능한 파일: {len(available)}건**")
+
+            for f_info in available:
+                fname = f_info["name"]
+                size_kb = f_info.get("size", 0) / 1024
+                already = fname in imported_filenames
+
+                col_name, col_size, col_btn = st.columns([3, 1, 1])
+                with col_name:
+                    year = fname.split("_")[0]
+                    label = f"{year}학년도 수능 국어"
+                    if already:
+                        st.markdown(f"~~{label}~~ (가져옴)")
+                    else:
+                        st.markdown(f"**{label}**")
+                with col_size:
+                    st.caption(f"{size_kb:.1f} KB")
+                with col_btn:
+                    if not already:
+                        if st.button("가져오기", key=f"import_{fname}"):
+                            with st.spinner(f"{fname} 가져오는 중..."):
+                                result = import_kice_exam(fname)
+                            if result["success"]:
+                                stats = result["stats"]
+                                st.success(
+                                    f"가져오기 완료! "
+                                    f"지문 {stats['passages']}개, "
+                                    f"문항 {stats['questions']}개, "
+                                    f"총점 {stats['total_score']}점"
+                                )
+                                st.rerun()
+                            else:
+                                st.error(f"가져오기 실패: {result.get('error', '알 수 없는 오류')}")
+
+    # --- 탭 2: KICE 형식 JSON 파일 직접 업로드 ---
+    with tab2:
+        st.markdown("#### KICE 형식 JSON 파일 업로드")
+        st.info(
+            "KICE_slayer_AI_Korean 형식의 JSON 파일을 직접 업로드하여 가져올 수 있습니다. "
+            "다른 연도 데이터를 별도로 확보한 경우 여기서 업로드하세요."
+        )
+
+        uploaded = st.file_uploader(
+            "JSON 파일 선택",
+            type=["json"],
+            key="kice_json_upload"
+        )
+
+        if uploaded:
+            try:
+                content = uploaded.read().decode("utf-8")
+                kice_data = json.loads(content)
+
+                if not isinstance(kice_data, list):
+                    st.error("올바른 KICE 형식이 아닙니다. 최상위가 배열(list)이어야 합니다.")
+                else:
+                    # 미리보기
+                    total_problems = sum(len(s.get("problems", [])) for s in kice_data)
+                    total_sections = len(kice_data)
+                    categories = set()
+                    for s in kice_data:
+                        categories.add(TYPE_TO_CATEGORY.get(s.get("type", 0), "독서"))
+
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("지문 수", total_sections)
+                    col2.metric("문항 수", total_problems)
+                    col3.metric("영역", ", ".join(categories))
+
+                    st.markdown("**파일명으로 연도 정보가 추출됩니다** (예: `2024_11_KICE.json`)")
+                    custom_name = st.text_input(
+                        "파일명 (연도_월_KICE.json 형식)",
+                        value=uploaded.name,
+                        key="kice_custom_filename"
+                    )
+
+                    if st.button("가져오기", key="upload_import", use_container_width=True):
+                        with st.spinner("변환 및 저장 중..."):
+                            result = import_from_local_json(kice_data, custom_name)
+                        if result["success"]:
+                            stats = result["stats"]
+                            st.success(
+                                f"가져오기 완료! "
+                                f"지문 {stats['passages']}개, "
+                                f"문항 {stats['questions']}개, "
+                                f"총점 {stats['total_score']}점 "
+                                f"(ID: `{result['file_id']}`)"
+                            )
+                            st.rerun()
+                        else:
+                            st.error(f"가져오기 실패: {result.get('error', '알 수 없는 오류')}")
+            except json.JSONDecodeError:
+                st.error("JSON 파싱 오류입니다. 올바른 JSON 파일인지 확인해주세요.")
+
+    # --- 탭 3: 문제은행 현황 ---
+    with tab3:
+        st.markdown("#### 문제은행 현황")
+
+        db = get_db()
+        bank_items = [d for d in db if d.get("source") == "KICE_slayer_AI_Korean"]
+
+        if not bank_items:
+            st.info("아직 문제은행에 가져온 데이터가 없습니다. 'KICE 기출 가져오기' 탭에서 데이터를 가져오세요.")
+        else:
+            # 통계 요약
+            total_q = 0
+            total_p = 0
+            for item in bank_items:
+                fdata = load_json_data(item["file_id"])
+                if fdata:
+                    total_q += len(fdata.get("questions", []))
+                    total_p += len(fdata.get("passages", []))
+
+            col1, col2, col3 = st.columns(3)
+            col1.metric("시험지 수", len(bank_items))
+            col2.metric("총 지문 수", total_p)
+            col3.metric("총 문항 수", total_q)
+
+            st.markdown("---")
+
+            for item in sorted(bank_items, key=lambda x: x.get("year", ""), reverse=True):
+                fdata = load_json_data(item["file_id"])
+                if not fdata:
+                    continue
+
+                questions = fdata.get("questions", [])
+                passages = fdata.get("passages", [])
+                year = item.get("year", "?")
+                month = item.get("month", "?")
+
+                with st.expander(f"{year}학년도 {month}월 수능 국어 — 지문 {len(passages)}개 / 문항 {len(questions)}개", expanded=False):
+                    # 카테고리별 통계
+                    cat_counts = {}
+                    for q in questions:
+                        cat = q.get("category", "기타")
+                        cat_counts[cat] = cat_counts.get(cat, 0) + 1
+
+                    cat_cols = st.columns(len(cat_counts))
+                    for i, (cat, cnt) in enumerate(cat_counts.items()):
+                        cat_cols[i].metric(cat, f"{cnt}문항")
+
+                    st.markdown("---")
+
+                    # 문항 목록
+                    for q in sorted(questions, key=lambda x: int(x.get("q_num", 0)) if str(x.get("q_num", 0)).isdigit() else 0):
+                        q_num = q.get("q_num", "?")
+                        stem = q.get("q_stem", "")[:80]
+                        cat = q.get("category", "")
+                        answer = q.get("answer", "")
+                        score = q.get("score", "")
+                        ans_str = f" | 정답: {answer}" if answer else ""
+                        score_str = f" | {score}점" if score else ""
+
+                        st.markdown(
+                            f"**{q_num}번** ({cat}{score_str}{ans_str}) — {stem}..."
+                        )
