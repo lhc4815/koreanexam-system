@@ -1340,7 +1340,7 @@ elif selected == "문서 뷰어":
                         pid_to_pm[pid] = pm
 
                 # 문항을 지문에 매핑
-                for q in sorted(questions, key=lambda x: x.get('q_num', 0)):
+                for q in sorted(questions, key=lambda x: int(x.get('q_num', 0)) if str(x.get('q_num', 0)).isdigit() else 0):
                     q_num = q.get('q_num', 0)
                     q_pid = q.get('passage_id')
                     matched = False
@@ -1458,7 +1458,7 @@ elif selected == "문서 뷰어":
                 if orphan_questions:
                     # 하나의 완전한 HTML 블록으로 구성
                     orphan_parts = ['<div class="exam-section"><div class="exam-header">기타 문항</div><div class="exam-questions">']
-                    for q in sorted(orphan_questions, key=lambda x: x.get('q_num', 0)):
+                    for q in sorted(orphan_questions, key=lambda x: int(x.get('q_num', 0)) if str(x.get('q_num', 0)).isdigit() else 0):
                         choices_html = "".join([f'<div class="exam-choice">{escape_html(q.get(f"choice_{i}", ""))}</div>' for i in range(1, 6) if q.get(f'choice_{i}')])
                         ref_content = escape_html(q.get("reference_box", "")).replace('\n', '<br/>') if q.get('reference_box') else ""
                         ref_html = f'<div class="exam-q-ref"><strong>&lt;보기&gt;</strong><br/>{ref_content}</div>' if ref_content else ""
@@ -1469,7 +1469,7 @@ elif selected == "문서 뷰어":
 
             # === 문항별 뷰 ===
             elif view_mode == "문항별":
-                for q in sorted(questions, key=lambda x: x.get('q_num', 0)):
+                for q in sorted(questions, key=lambda x: int(x.get('q_num', 0)) if str(x.get('q_num', 0)).isdigit() else 0):
                     choices_html = "".join([f'<div class="q-choice">{escape_html(q.get(f"choice_{i}", ""))}</div>' for i in range(1, 6) if q.get(f'choice_{i}')])
                     ref_content = escape_html(q.get("reference_box", "")).replace('\n', '<br/>') if q.get('reference_box') else ""
                     ref_html = f'<div class="q-ref"><strong>&lt;보기&gt;</strong><div style="margin-top:0.5rem;">{ref_content}</div></div>' if ref_content else ""
