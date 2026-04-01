@@ -79,8 +79,9 @@ def task_extract_json(file_id: str, filepath: str, metadata: dict) -> None:
         if not api_key:
             raise ValueError("GOOGLE_API_KEY가 설정되지 않았습니다.")
 
-        configure_api(api_key)
-        write_log(file_id, "[OK] API 키 로드 완료")
+        model_type = metadata.get("model_type", "flash")
+        configure_api(api_key, model_type=model_type)
+        write_log(file_id, f"[OK] API 키 로드 완료 (모델: {model_type})")
 
         # PDF를 로컬 temp로 다운로드
         temp_dir = get_temp_dir(file_id)

@@ -820,6 +820,10 @@ elif selected == "파일 업로드":
 
         desc = st.text_area("메모", placeholder="추가 정보 입력 (선택)")
 
+        auto_col1, auto_col2 = st.columns([1, 3])
+        with auto_col1:
+            st.session_state["auto_extract"] = st.checkbox("업로드 후 자동 추출", value=True, key="auto_extract_cb")
+
         st.markdown("<div style='height: 1rem;'></div>", unsafe_allow_html=True)
 
         submitted = st.form_submit_button("업로드", use_container_width=True, type="primary")
@@ -859,7 +863,16 @@ elif selected == "파일 업로드":
                 }
 
                 save_entry(entry)
-                st.success(f"'{uploaded_file.name}' 파일이 업로드되었습니다. 데이터 처리 메뉴에서 추출을 시작하세요.")
+
+                # 자동 추출 시작
+                auto_extract = st.session_state.get("auto_extract", True)
+                if auto_extract:
+                    st.info(f"'{uploaded_file.name}' 업로드 완료! AI 추출을 자동 시작합니다...")
+                    from backend import task_extract_json, run_thread
+                    run_thread(task_extract_json, file_id)
+                    st.success(f"추출이 시작되었습니다. 데이터 처리 메뉴에서 진행 상황을 확인하세요.")
+                else:
+                    st.success(f"'{uploaded_file.name}' 파일이 업로드되었습니다. 데이터 처리 메뉴에서 추출을 시작하세요.")
 
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -915,7 +928,7 @@ elif selected == "데이터 처리":
 
             is_active = status in ['Extracting', 'Verifying', 'Converting', 'Stopping']
 
-            title = f"{item.get('subject', item['filename'])} | {item['filename']}"
+            title = format_doc_label(item)
 
             with st.expander(title, expanded=is_active):
                 col_info, col_actions = st.columns([2, 1])
@@ -966,9 +979,12 @@ elif selected == "데이터 처리":
 
                     else:
                         if status in ['Ready', 'Stopped', 'Error']:
+                            model_choice = st.radio("AI 모델", ["flash (빠름)", "pro (고품질)"], horizontal=True, key=f"model_{file_id}")
+                            model_type = "flash" if "flash" in model_choice else "pro"
                             btn_text = "추출 시작" if status == 'Ready' else "추출 재개"
                             if st.button(btn_text, key=f"ext_{file_id}", type="primary", use_container_width=True):
-                                run_thread(task_extract_json, (file_id, item['filepath'], item))
+                                item_with_model = {**item, "model_type": model_type}
+                                run_thread(task_extract_json, (file_id, item['filepath'], item_with_model))
                                 st.rerun()
 
                         if status in ['Extracted', 'Modified', 'Done']:
@@ -1274,9 +1290,9 @@ elif selected == "문서 뷰어":
                     tmpl_cfg = template_to_config(selected_tmpl, overrides)
                     sorted_questions = sorted(questions, key=lambda x: int(x.get('q_num', 0)) if str(x.get('q_num', 0)).isdigit() else 0)
                     pdf_bytes = generate_exam_pdf_from_template(tmpl_cfg, sorted_questions, passages)
-                fname = f"시험지_{meta.get('exam_type', '')}_{meta.get('subject', '국어')}.pdf".replace(' ', '_')
-                st.download_button("PDF 다운로드", data=pdf_bytes, file_name=fname, mime="application/pdf", use_container_width=True)
-                st.success(f"PDF 생성 완료! ({len(questions)}문항, {len(passages)}지문) — 양식: {viewer_tmpl_name}")
+                    fname = f"시험지_{meta.get('exam_type', '')}_{meta.get('subject', '국어')}.pdf".replace(' ', '_')
+                    st.download_button("PDF 다운로드", data=pdf_bytes, file_name=fname, mime="application/pdf", use_container_width=True)
+                    st.success(f"PDF 생성 완료! ({len(questions)}문항, {len(passages)}지문) — 양식: {viewer_tmpl_name}")
 
             st.markdown("<div style='height:0.5rem;'></div>", unsafe_allow_html=True)
 
@@ -1566,6 +1582,7 @@ elif selected == "시험지구성":
         if "editing_template" in st.session_state:
             st.markdown("---")
             tmpl_edit = st.session_state["editing_template"]
+            tid = tmpl_edit.get("template_id", "new")  # 양식별 고유 키 접미사
             is_new = not tmpl_edit.get("template_id")
             edit_title = "새 양식 만들기" if is_new else f"양식 편집: {tmpl_edit.get('name', '')}"
             st.markdown(f"#### {edit_title}")
@@ -1574,66 +1591,69 @@ elif selected == "시험지구성":
 
             # ── 왼쪽: 설정 폼 ──
             with edit_left:
-                tmpl_edit["name"] = st.text_input("양식 이름", value=tmpl_edit.get("name", ""), key="tmpl_name")
-                tmpl_edit["description"] = st.text_input("설명", value=tmpl_edit.get("description", ""), key="tmpl_desc")
+                layout_e = tmpl_edit.setdefault("layout", {})
+                header_e = tmpl_edit.setdefault("header", {})
+                footer_e = tmpl_edit.setdefault("footer", {})
+                fonts_e = tmpl_edit.setdefault("fonts", {})
+                spacing_e = tmpl_edit.setdefault("spacing", {})
+
+                tmpl_edit["name"] = st.text_input("양식 이름", value=tmpl_edit.get("name", ""), key=f"tn_{tid}")
+                tmpl_edit["description"] = st.text_input("설명", value=tmpl_edit.get("description", ""), key=f"td_{tid}")
 
                 st.markdown("##### 레이아웃")
-                layout_e = tmpl_edit.setdefault("layout", {})
                 le_col1, le_col2 = st.columns(2)
                 with le_col1:
-                    layout_e["columns"] = st.selectbox("단수", [1, 2], index=0 if layout_e.get("columns", 1) == 1 else 1, key="tmpl_cols")
-                    layout_e["margin_left"] = st.number_input("좌우 여백(mm)", value=layout_e.get("margin_left", 15), min_value=5, max_value=40, key="tmpl_ml")
+                    layout_e["columns"] = st.selectbox("단수", [1, 2], index=0 if layout_e.get("columns", 1) == 1 else 1, key=f"tc_{tid}")
+                    layout_e["margin_left"] = st.number_input("좌우 여백(mm)", value=layout_e.get("margin_left", 15), min_value=5, max_value=40, key=f"tml_{tid}")
                     layout_e["margin_right"] = layout_e["margin_left"]
                 with le_col2:
-                    layout_e["margin_top"] = st.number_input("상 여백(mm)", value=layout_e.get("margin_top", 12), min_value=5, max_value=40, key="tmpl_mt")
-                    layout_e["margin_bottom"] = st.number_input("하 여백(mm)", value=layout_e.get("margin_bottom", 10), min_value=5, max_value=40, key="tmpl_mb")
+                    layout_e["margin_top"] = st.number_input("상 여백(mm)", value=layout_e.get("margin_top", 12), min_value=5, max_value=40, key=f"tmt_{tid}")
+                    layout_e["margin_bottom"] = st.number_input("하 여백(mm)", value=layout_e.get("margin_bottom", 10), min_value=5, max_value=40, key=f"tmb_{tid}")
                 if layout_e["columns"] == 2:
-                    layout_e["gutter"] = st.number_input("단 간격(mm)", value=layout_e.get("gutter", 6), min_value=2, max_value=20, key="tmpl_gutter")
+                    layout_e["gutter"] = st.number_input("단 간격(mm)", value=layout_e.get("gutter", 6), min_value=2, max_value=20, key=f"tg_{tid}")
 
                 st.markdown("##### 헤더")
-                header_e = tmpl_edit.setdefault("header", {})
+                header_styles = ["school", "suneung", "minimal", "none"]
+                cur_style = header_e.get("style", "school")
+                style_idx = header_styles.index(cur_style) if cur_style in header_styles else 0
                 he_col1, he_col2 = st.columns(2)
                 with he_col1:
-                    header_e["style"] = st.selectbox("헤더 스타일", ["school", "suneung", "minimal", "none"],
-                        index=["school", "suneung", "minimal", "none"].index(header_e.get("style", "school")), key="tmpl_hstyle")
+                    header_e["style"] = st.selectbox("헤더 스타일", header_styles, index=style_idx, key=f"ths_{tid}")
                 with he_col2:
-                    header_e["show_border"] = st.checkbox("구분선 표시", value=header_e.get("show_border", True), key="tmpl_hborder")
-                header_e["line_1"] = st.text_input("1행", value=header_e.get("line_1", ""), key="tmpl_h1",
+                    header_e["show_border"] = st.checkbox("구분선 표시", value=header_e.get("show_border", True), key=f"thb_{tid}")
+                header_e["line_1"] = st.text_input("1행", value=header_e.get("line_1", ""), key=f"th1_{tid}",
                     help="변수: {school_name}, {exam_name}, {title}, {subject}, {grade}, {session}, {form_type}, {exam_date}, {time_limit}")
-                header_e["line_2"] = st.text_input("2행", value=header_e.get("line_2", ""), key="tmpl_h2")
-                header_e["line_3"] = st.text_input("3행", value=header_e.get("line_3", ""), key="tmpl_h3")
+                header_e["line_2"] = st.text_input("2행", value=header_e.get("line_2", ""), key=f"th2_{tid}")
+                header_e["line_3"] = st.text_input("3행", value=header_e.get("line_3", ""), key=f"th3_{tid}")
 
                 st.markdown("##### 푸터")
-                footer_e = tmpl_edit.setdefault("footer", {})
                 fe_col1, fe_col2 = st.columns(2)
                 with fe_col1:
-                    footer_e["show_page_number"] = st.checkbox("페이지 번호", value=footer_e.get("show_page_number", True), key="tmpl_fpn")
+                    footer_e["show_page_number"] = st.checkbox("페이지 번호", value=footer_e.get("show_page_number", True), key=f"tfp_{tid}")
                 with fe_col2:
-                    footer_e["custom_text"] = st.text_input("푸터 텍스트", value=footer_e.get("custom_text", ""), key="tmpl_ftxt")
+                    footer_e["custom_text"] = st.text_input("푸터 텍스트", value=footer_e.get("custom_text", ""), key=f"tft_{tid}")
 
                 st.markdown("##### 폰트 크기")
-                fonts_e = tmpl_edit.setdefault("fonts", {})
                 fc1, fc2 = st.columns(2)
                 with fc1:
-                    fonts_e["passage_size"] = st.number_input("지문(pt)", value=float(fonts_e.get("passage_size", 10)), min_value=6.0, max_value=16.0, step=0.5, key="tmpl_fp")
+                    fonts_e["passage_size"] = st.number_input("지문(pt)", value=float(fonts_e.get("passage_size", 10)), min_value=6.0, max_value=16.0, step=0.5, key=f"tfps_{tid}")
                     fonts_e["passage_leading"] = fonts_e["passage_size"] + 5
-                    fonts_e["stem_size"] = st.number_input("발문(pt)", value=float(fonts_e.get("stem_size", 11)), min_value=6.0, max_value=16.0, step=0.5, key="tmpl_fs")
+                    fonts_e["stem_size"] = st.number_input("발문(pt)", value=float(fonts_e.get("stem_size", 11)), min_value=6.0, max_value=16.0, step=0.5, key=f"tfss_{tid}")
                     fonts_e["stem_leading"] = fonts_e["stem_size"] + 5
                 with fc2:
-                    fonts_e["choice_size"] = st.number_input("선지(pt)", value=float(fonts_e.get("choice_size", 10)), min_value=6.0, max_value=16.0, step=0.5, key="tmpl_fc")
+                    fonts_e["choice_size"] = st.number_input("선지(pt)", value=float(fonts_e.get("choice_size", 10)), min_value=6.0, max_value=16.0, step=0.5, key=f"tfcs_{tid}")
                     fonts_e["choice_leading"] = fonts_e["choice_size"] + 4
-                    fonts_e["box_body_size"] = st.number_input("보기(pt)", value=float(fonts_e.get("box_body_size", 9.5)), min_value=6.0, max_value=16.0, step=0.5, key="tmpl_fb")
+                    fonts_e["box_body_size"] = st.number_input("보기(pt)", value=float(fonts_e.get("box_body_size", 9.5)), min_value=6.0, max_value=16.0, step=0.5, key=f"tfbs_{tid}")
                     fonts_e["box_title_size"] = fonts_e["box_body_size"] + 0.5
 
                 st.markdown("##### 간격")
-                spacing_e = tmpl_edit.setdefault("spacing", {})
                 sc1, sc2, sc3 = st.columns(3)
                 with sc1:
-                    spacing_e["before_question"] = st.number_input("문항 전", value=int(spacing_e.get("before_question", 12)), min_value=4, max_value=30, key="tmpl_sbq")
+                    spacing_e["before_question"] = st.number_input("문항 전", value=int(spacing_e.get("before_question", 12)), min_value=4, max_value=30, key=f"tsb_{tid}")
                 with sc2:
-                    spacing_e["choice_gap"] = st.number_input("선지", value=int(spacing_e.get("choice_gap", 2)), min_value=0, max_value=10, key="tmpl_scg")
+                    spacing_e["choice_gap"] = st.number_input("선지", value=int(spacing_e.get("choice_gap", 2)), min_value=0, max_value=10, key=f"tsc_{tid}")
                 with sc3:
-                    spacing_e["passage_indent"] = st.number_input("들여쓰기", value=int(spacing_e.get("passage_indent", 10)), min_value=0, max_value=30, key="tmpl_spi")
+                    spacing_e["passage_indent"] = st.number_input("들여쓰기", value=int(spacing_e.get("passage_indent", 10)), min_value=0, max_value=30, key=f"tsp_{tid}")
 
                 save_col1, save_col2 = st.columns(2)
                 with save_col1:
