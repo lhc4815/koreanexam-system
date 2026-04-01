@@ -1154,6 +1154,45 @@ elif selected == "문서 뷰어":
             doc_info_html = f'<div class="content-card"><div style="display:flex;justify-content:space-between;align-items:center;"><div><h3 style="margin:0;color:#212529;">{meta.get("subject", "제목 없음")}</h3><p style="margin:0.5rem 0 0 0;color:#6c757d;font-size:0.875rem;">{meta.get("exam_type", "")} {meta.get("year", "")} {meta.get("grade", "")}</p></div><div style="text-align:right;"><span class="badge badge-{badge_class}">{badge_text}</span><p style="margin:0.5rem 0 0 0;color:#6c757d;font-size:0.75rem;">문항 {len(questions)}개 | 지문 {len(passages)}개</p></div></div></div>'
             st.markdown(doc_info_html, unsafe_allow_html=True)
 
+            # ── 시험지 PDF 다운로드 (원클릭) ──
+            from exam_pdf_generator import generate_exam_pdf, ExamPaperConfig
+            dl_col1, dl_col2 = st.columns([1, 1])
+            with dl_col1:
+                if st.button("내신형 시험지 PDF 다운로드", key="viewer_school_pdf", use_container_width=True, type="primary"):
+                    with st.spinner("PDF 생성 중..."):
+                        school_config = ExamPaperConfig(
+                            subject=meta.get("subject", "국어"),
+                            school_name=meta.get("school", ""),
+                            exam_name=f"{meta.get('year', '')} {meta.get('exam_type', '')}",
+                            grade=meta.get("grade", ""),
+                            exam_date="",
+                            time_limit="",
+                            layout_type="school",
+                        )
+                        sorted_questions = sorted(questions, key=lambda x: int(x.get('q_num', 0)) if str(x.get('q_num', 0)).isdigit() else 0)
+                        pdf_bytes = generate_exam_pdf(school_config, sorted_questions, passages)
+                    fname = f"{meta.get('school', '시험지')}_{meta.get('exam_type', '')}_{meta.get('subject', '국어')}.pdf".replace(' ', '_')
+                    st.download_button("PDF 다운로드", data=pdf_bytes, file_name=fname, mime="application/pdf", use_container_width=True)
+                    st.success(f"PDF 생성 완료! ({len(questions)}문항, {len(passages)}지문)")
+
+            with dl_col2:
+                if st.button("수능형 시험지 PDF 다운로드", key="viewer_suneung_pdf", use_container_width=True):
+                    with st.spinner("PDF 생성 중..."):
+                        suneung_config = ExamPaperConfig(
+                            title=f"{meta.get('year', '')}학년도 {meta.get('exam_type', '시험')} 문제지",
+                            subject=meta.get("subject", "국어 영역"),
+                            session="제1교시",
+                            form_type="홀수형",
+                            layout_type="suneung",
+                        )
+                        sorted_questions = sorted(questions, key=lambda x: int(x.get('q_num', 0)) if str(x.get('q_num', 0)).isdigit() else 0)
+                        pdf_bytes = generate_exam_pdf(suneung_config, sorted_questions, passages)
+                    fname = f"수능형_{meta.get('exam_type', '')}_{meta.get('subject', '국어')}.pdf".replace(' ', '_')
+                    st.download_button("PDF 다운로드", data=pdf_bytes, file_name=fname, mime="application/pdf", use_container_width=True)
+                    st.success(f"PDF 생성 완료! ({len(questions)}문항, {len(passages)}지문)")
+
+            st.markdown("<div style='height:0.5rem;'></div>", unsafe_allow_html=True)
+
             import re
             import html as html_lib  # HTML 이스케이프용
 
@@ -1548,7 +1587,8 @@ elif selected == "시험지구성":
     with col1:
         preview_btn = st.button("시험지 미리보기", use_container_width=True)
     with col2:
-        pdf_btn = st.button("PDF 생성 (2단 수능형)", use_container_width=True, type="primary", disabled=len(st.session_state.exam_selected_questions) == 0)
+        layout_label = "수능형 2단" if st.session_state.exam_info['layout_type'] == '수능형' else "내신형 1단"
+        pdf_btn = st.button(f"PDF 생성 ({layout_label})", use_container_width=True, type="primary", disabled=len(st.session_state.exam_selected_questions) == 0)
 
     if preview_btn and st.session_state.exam_selected_questions:
         st.markdown("<div style='height:1rem;'></div>", unsafe_allow_html=True)
