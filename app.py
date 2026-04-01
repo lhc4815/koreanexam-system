@@ -1486,85 +1486,154 @@ elif selected == "시험지구성":
             edit_title = "새 양식 만들기" if is_new else f"양식 편집: {tmpl_edit.get('name', '')}"
             st.markdown(f"#### {edit_title}")
 
-            # 기본 정보
-            tmpl_edit["name"] = st.text_input("양식 이름", value=tmpl_edit.get("name", ""), key="tmpl_name")
-            tmpl_edit["description"] = st.text_input("설명", value=tmpl_edit.get("description", ""), key="tmpl_desc")
+            edit_left, edit_right = st.columns([1, 1])
 
-            st.markdown("##### 레이아웃")
-            layout_e = tmpl_edit.setdefault("layout", {})
-            le_col1, le_col2, le_col3, le_col4 = st.columns(4)
-            with le_col1:
-                layout_e["columns"] = st.selectbox("단수", [1, 2], index=0 if layout_e.get("columns", 1) == 1 else 1, key="tmpl_cols")
-            with le_col2:
-                layout_e["margin_left"] = st.number_input("좌 여백(mm)", value=layout_e.get("margin_left", 15), min_value=5, max_value=40, key="tmpl_ml")
-                layout_e["margin_right"] = layout_e["margin_left"]  # 좌우 동일
-            with le_col3:
-                layout_e["margin_top"] = st.number_input("상 여백(mm)", value=layout_e.get("margin_top", 12), min_value=5, max_value=40, key="tmpl_mt")
-            with le_col4:
-                layout_e["margin_bottom"] = st.number_input("하 여백(mm)", value=layout_e.get("margin_bottom", 10), min_value=5, max_value=40, key="tmpl_mb")
-            if layout_e["columns"] == 2:
-                layout_e["gutter"] = st.number_input("단 간격(mm)", value=layout_e.get("gutter", 6), min_value=2, max_value=20, key="tmpl_gutter")
+            # ── 왼쪽: 설정 폼 ──
+            with edit_left:
+                tmpl_edit["name"] = st.text_input("양식 이름", value=tmpl_edit.get("name", ""), key="tmpl_name")
+                tmpl_edit["description"] = st.text_input("설명", value=tmpl_edit.get("description", ""), key="tmpl_desc")
 
-            st.markdown("##### 헤더")
-            header_e = tmpl_edit.setdefault("header", {})
-            he_col1, he_col2 = st.columns(2)
-            with he_col1:
-                header_e["style"] = st.selectbox("헤더 스타일", ["school", "suneung", "minimal", "none"],
-                    index=["school", "suneung", "minimal", "none"].index(header_e.get("style", "school")), key="tmpl_hstyle")
-            with he_col2:
-                header_e["show_border"] = st.checkbox("구분선 표시", value=header_e.get("show_border", True), key="tmpl_hborder")
-            header_e["line_1"] = st.text_input("헤더 1행", value=header_e.get("line_1", ""), key="tmpl_h1",
-                help="변수: {school_name}, {exam_name}, {title}, {subject}, {grade}, {session}, {form_type}, {exam_date}, {time_limit}")
-            header_e["line_2"] = st.text_input("헤더 2행", value=header_e.get("line_2", ""), key="tmpl_h2")
-            header_e["line_3"] = st.text_input("헤더 3행", value=header_e.get("line_3", ""), key="tmpl_h3")
+                st.markdown("##### 레이아웃")
+                layout_e = tmpl_edit.setdefault("layout", {})
+                le_col1, le_col2 = st.columns(2)
+                with le_col1:
+                    layout_e["columns"] = st.selectbox("단수", [1, 2], index=0 if layout_e.get("columns", 1) == 1 else 1, key="tmpl_cols")
+                    layout_e["margin_left"] = st.number_input("좌우 여백(mm)", value=layout_e.get("margin_left", 15), min_value=5, max_value=40, key="tmpl_ml")
+                    layout_e["margin_right"] = layout_e["margin_left"]
+                with le_col2:
+                    layout_e["margin_top"] = st.number_input("상 여백(mm)", value=layout_e.get("margin_top", 12), min_value=5, max_value=40, key="tmpl_mt")
+                    layout_e["margin_bottom"] = st.number_input("하 여백(mm)", value=layout_e.get("margin_bottom", 10), min_value=5, max_value=40, key="tmpl_mb")
+                if layout_e["columns"] == 2:
+                    layout_e["gutter"] = st.number_input("단 간격(mm)", value=layout_e.get("gutter", 6), min_value=2, max_value=20, key="tmpl_gutter")
 
-            st.markdown("##### 푸터")
-            footer_e = tmpl_edit.setdefault("footer", {})
-            fe_col1, fe_col2 = st.columns(2)
-            with fe_col1:
-                footer_e["show_page_number"] = st.checkbox("페이지 번호", value=footer_e.get("show_page_number", True), key="tmpl_fpn")
-            with fe_col2:
-                footer_e["custom_text"] = st.text_input("푸터 텍스트", value=footer_e.get("custom_text", ""), key="tmpl_ftxt")
+                st.markdown("##### 헤더")
+                header_e = tmpl_edit.setdefault("header", {})
+                he_col1, he_col2 = st.columns(2)
+                with he_col1:
+                    header_e["style"] = st.selectbox("헤더 스타일", ["school", "suneung", "minimal", "none"],
+                        index=["school", "suneung", "minimal", "none"].index(header_e.get("style", "school")), key="tmpl_hstyle")
+                with he_col2:
+                    header_e["show_border"] = st.checkbox("구분선 표시", value=header_e.get("show_border", True), key="tmpl_hborder")
+                header_e["line_1"] = st.text_input("1행", value=header_e.get("line_1", ""), key="tmpl_h1",
+                    help="변수: {school_name}, {exam_name}, {title}, {subject}, {grade}, {session}, {form_type}, {exam_date}, {time_limit}")
+                header_e["line_2"] = st.text_input("2행", value=header_e.get("line_2", ""), key="tmpl_h2")
+                header_e["line_3"] = st.text_input("3행", value=header_e.get("line_3", ""), key="tmpl_h3")
 
-            st.markdown("##### 폰트 크기")
-            fonts_e = tmpl_edit.setdefault("fonts", {})
-            fc1, fc2, fc3, fc4 = st.columns(4)
-            with fc1:
-                fonts_e["passage_size"] = st.number_input("지문(pt)", value=float(fonts_e.get("passage_size", 10)), min_value=6.0, max_value=16.0, step=0.5, key="tmpl_fp")
-                fonts_e["passage_leading"] = fonts_e["passage_size"] + 5
-            with fc2:
-                fonts_e["stem_size"] = st.number_input("발문(pt)", value=float(fonts_e.get("stem_size", 11)), min_value=6.0, max_value=16.0, step=0.5, key="tmpl_fs")
-                fonts_e["stem_leading"] = fonts_e["stem_size"] + 5
-            with fc3:
-                fonts_e["choice_size"] = st.number_input("선지(pt)", value=float(fonts_e.get("choice_size", 10)), min_value=6.0, max_value=16.0, step=0.5, key="tmpl_fc")
-                fonts_e["choice_leading"] = fonts_e["choice_size"] + 4
-            with fc4:
-                fonts_e["box_body_size"] = st.number_input("보기(pt)", value=float(fonts_e.get("box_body_size", 9.5)), min_value=6.0, max_value=16.0, step=0.5, key="tmpl_fb")
-                fonts_e["box_title_size"] = fonts_e["box_body_size"] + 0.5
+                st.markdown("##### 푸터")
+                footer_e = tmpl_edit.setdefault("footer", {})
+                fe_col1, fe_col2 = st.columns(2)
+                with fe_col1:
+                    footer_e["show_page_number"] = st.checkbox("페이지 번호", value=footer_e.get("show_page_number", True), key="tmpl_fpn")
+                with fe_col2:
+                    footer_e["custom_text"] = st.text_input("푸터 텍스트", value=footer_e.get("custom_text", ""), key="tmpl_ftxt")
 
-            st.markdown("##### 간격")
-            spacing_e = tmpl_edit.setdefault("spacing", {})
-            sc1, sc2, sc3 = st.columns(3)
-            with sc1:
-                spacing_e["before_question"] = st.number_input("문항 전 간격", value=int(spacing_e.get("before_question", 12)), min_value=4, max_value=30, key="tmpl_sbq")
-            with sc2:
-                spacing_e["choice_gap"] = st.number_input("선지 간격", value=int(spacing_e.get("choice_gap", 2)), min_value=0, max_value=10, key="tmpl_scg")
-            with sc3:
-                spacing_e["passage_indent"] = st.number_input("지문 들여쓰기", value=int(spacing_e.get("passage_indent", 10)), min_value=0, max_value=30, key="tmpl_spi")
+                st.markdown("##### 폰트 크기")
+                fonts_e = tmpl_edit.setdefault("fonts", {})
+                fc1, fc2 = st.columns(2)
+                with fc1:
+                    fonts_e["passage_size"] = st.number_input("지문(pt)", value=float(fonts_e.get("passage_size", 10)), min_value=6.0, max_value=16.0, step=0.5, key="tmpl_fp")
+                    fonts_e["passage_leading"] = fonts_e["passage_size"] + 5
+                    fonts_e["stem_size"] = st.number_input("발문(pt)", value=float(fonts_e.get("stem_size", 11)), min_value=6.0, max_value=16.0, step=0.5, key="tmpl_fs")
+                    fonts_e["stem_leading"] = fonts_e["stem_size"] + 5
+                with fc2:
+                    fonts_e["choice_size"] = st.number_input("선지(pt)", value=float(fonts_e.get("choice_size", 10)), min_value=6.0, max_value=16.0, step=0.5, key="tmpl_fc")
+                    fonts_e["choice_leading"] = fonts_e["choice_size"] + 4
+                    fonts_e["box_body_size"] = st.number_input("보기(pt)", value=float(fonts_e.get("box_body_size", 9.5)), min_value=6.0, max_value=16.0, step=0.5, key="tmpl_fb")
+                    fonts_e["box_title_size"] = fonts_e["box_body_size"] + 0.5
 
-            st.markdown("---")
+                st.markdown("##### 간격")
+                spacing_e = tmpl_edit.setdefault("spacing", {})
+                sc1, sc2, sc3 = st.columns(3)
+                with sc1:
+                    spacing_e["before_question"] = st.number_input("문항 전", value=int(spacing_e.get("before_question", 12)), min_value=4, max_value=30, key="tmpl_sbq")
+                with sc2:
+                    spacing_e["choice_gap"] = st.number_input("선지", value=int(spacing_e.get("choice_gap", 2)), min_value=0, max_value=10, key="tmpl_scg")
+                with sc3:
+                    spacing_e["passage_indent"] = st.number_input("들여쓰기", value=int(spacing_e.get("passage_indent", 10)), min_value=0, max_value=30, key="tmpl_spi")
 
-            save_col1, save_col2 = st.columns(2)
-            with save_col1:
-                if st.button("저장", use_container_width=True, type="primary", key="tmpl_save"):
-                    saved_id = save_template(tmpl_edit)
-                    st.success(f"양식 '{tmpl_edit['name']}' 저장 완료! (ID: {saved_id})")
-                    del st.session_state["editing_template"]
-                    st.rerun()
-            with save_col2:
-                if st.button("취소", use_container_width=True, key="tmpl_cancel"):
-                    del st.session_state["editing_template"]
-                    st.rerun()
+                save_col1, save_col2 = st.columns(2)
+                with save_col1:
+                    if st.button("저장", use_container_width=True, type="primary", key="tmpl_save"):
+                        saved_id = save_template(tmpl_edit)
+                        st.success(f"양식 '{tmpl_edit['name']}' 저장 완료!")
+                        del st.session_state["editing_template"]
+                        st.rerun()
+                with save_col2:
+                    if st.button("취소", use_container_width=True, key="tmpl_cancel"):
+                        del st.session_state["editing_template"]
+                        st.rerun()
+
+            # ── 오른쪽: 실시간 미리보기 ──
+            with edit_right:
+                st.markdown("##### 미리보기")
+                # 변수 치환용 샘플 데이터
+                sample_vars = {
+                    "school_name": "서울고등학교", "exam_name": "2026학년도 1학기 중간고사",
+                    "title": "2026학년도 대학수학능력시험 문제지", "subject": "국어",
+                    "grade": "1학년", "session": "제1교시", "form_type": "홀수형",
+                    "exam_date": "2026.04.25", "time_limit": "50분",
+                }
+                h1 = header_e.get("line_1", "").format_map({**sample_vars, **{k: v for k, v in sample_vars.items()}})
+                h2 = header_e.get("line_2", "").format_map(sample_vars)
+                h3 = header_e.get("line_3", "").format_map(sample_vars)
+
+                margin_lr = layout_e.get("margin_left", 15)
+                margin_t = layout_e.get("margin_top", 12)
+                cols = layout_e.get("columns", 1)
+                stem_sz = fonts_e.get("stem_size", 11)
+                passage_sz = fonts_e.get("passage_size", 10)
+                choice_sz = fonts_e.get("choice_size", 10)
+                box_sz = fonts_e.get("box_body_size", 9.5)
+                q_gap = spacing_e.get("before_question", 12)
+                c_gap = spacing_e.get("choice_gap", 2)
+                p_indent = spacing_e.get("passage_indent", 10)
+                border_css = "border-bottom:2px solid #333;padding-bottom:8px;margin-bottom:12px;" if header_e.get("show_border") else "margin-bottom:12px;"
+                footer_txt = footer_e.get("custom_text", "")
+                show_pn = footer_e.get("show_page_number", True)
+
+                # 헤더 스타일별 HTML
+                h_style = header_e.get("style", "school")
+                if h_style == "none":
+                    header_html = ""
+                elif h_style == "suneung":
+                    header_html = f'<div style="text-align:center;{border_css}"><div style="font-size:10px;color:#333;">{h1}</div><div style="font-size:22px;font-weight:bold;margin:4px 0;">{h2}</div><div style="font-size:9px;color:#555;">{h3}</div></div>'
+                elif h_style == "minimal":
+                    header_html = f'<div style="{border_css}"><div style="font-size:14px;font-weight:600;">{h1}</div><div style="font-size:9px;color:#666;margin-top:2px;">{h3}</div></div>'
+                else:
+                    header_html = f'<div style="text-align:center;{border_css}"><div style="font-size:16px;font-weight:bold;">{h1}</div><div style="font-size:13px;font-weight:600;margin:3px 0;">{h2}</div><div style="font-size:9px;color:#555;">{h3}</div></div>'
+
+                # 푸터 HTML
+                footer_parts = []
+                if show_pn:
+                    footer_parts.append("1")
+                if footer_txt:
+                    footer_parts.append(f'<span style="font-size:6px;color:#999;">{footer_txt}</span>')
+                footer_html = f'<div style="text-align:center;border-top:1px solid #ddd;padding-top:4px;margin-top:10px;font-size:8px;color:#666;">{" &nbsp; ".join(footer_parts)}</div>' if footer_parts else ""
+
+                # 샘플 문항 HTML
+                sample_passage = f'<div style="font-size:{passage_sz}px;line-height:1.5;text-indent:{p_indent}px;color:#333;margin-bottom:8px;">글을 읽고 그 의미를 이해하는 독해에는 글의 유형이나 독서 흥미 등의 다양한 요소가 영향을 미칠 수 있다. 이를 고려하여 독해 능력을 복잡한 과정으로 설명한 연구가 많다.</div>'
+                sample_q1 = f'<div style="margin-top:{q_gap}px;"><div style="font-size:{stem_sz}px;font-weight:500;"><b>1.</b> 윗글의 내용과 일치하지 않는 것은?</div>'
+                sample_choices = "".join([f'<div style="font-size:{choice_sz}px;padding-left:14px;margin:{c_gap}px 0;color:#444;">{c}</div>' for c in ["① 해독은 단어 인식 능력이다.", "② 언어 이해는 의미 파악 능력이다.", "③ 독해는 해독과 언어 이해의 곱이다.", "④ 해독과 언어 이해는 독립적이다.", "⑤ 독서 경험이 선행되어야 한다."]])
+                sample_q2 = f'<div style="margin-top:{q_gap}px;"><div style="font-size:{stem_sz}px;font-weight:500;"><b>2.</b> &lt;보기&gt;를 바탕으로 이해한 내용으로 적절한 것은?</div><div style="border:1px solid #999;padding:6px 8px;margin:4px 0;font-size:{box_sz}px;color:#444;text-align:center;"><b>&lt;보 기&gt;</b><br/>학생 A는 해독은 잘 되었으나 이해력이 부족했다.</div>'
+                sample_choices2 = "".join([f'<div style="font-size:{choice_sz}px;padding-left:14px;margin:{c_gap}px 0;color:#444;">{c}</div>' for c in ["① 학생 A는 해독이 발달되었다.", "② 학생 A는 언어 이해가 부족하다.", "③ 학생 B는 해독이 부족하다."]])
+
+                # 2단 처리
+                if cols == 2:
+                    col_css = "display:flex;gap:8px;"
+                    content_html = f'<div style="{col_css}"><div style="flex:1;">{sample_passage}{sample_q1}{sample_choices}</div></div><div style="{col_css}"><div style="flex:1;">{sample_q2}{sample_choices2}</div></div></div>'
+                else:
+                    content_html = f'{sample_passage}{sample_q1}{sample_choices}</div>{sample_q2}{sample_choices2}</div>'
+
+                # 전체 미리보기 조립
+                preview_html = f'''
+                <div style="border:2px solid #333;padding:{margin_t}px {margin_lr}px;background:white;font-family:'Noto Sans KR',sans-serif;max-height:600px;overflow-y:auto;box-shadow:0 2px 8px rgba(0,0,0,0.15);">
+                    {header_html}
+                    {content_html}
+                    {footer_html}
+                </div>
+                '''
+                st.markdown(preview_html, unsafe_allow_html=True)
+                st.caption("설정을 변경하면 미리보기가 자동 업데이트됩니다.")
 
     # =================================================================
     # 탭 1: 시험지 만들기 (기존 시험지구성 로직)
