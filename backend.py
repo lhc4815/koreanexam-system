@@ -319,12 +319,12 @@ def task_reextract_pages(file_id: str, filepath: str, page_range: str) -> None:
                 try:
                     start, end = part.split("-")
                     target_pages.update(range(int(start), int(end) + 1))
-                except:
+                except Exception:
                     pass
             else:
                 try:
                     target_pages.add(int(part))
-                except:
+                except Exception:
                     pass
 
         if not target_pages:
@@ -361,7 +361,7 @@ def task_reextract_pages(file_id: str, filepath: str, page_range: str) -> None:
         for img_path in image_files:
             try:
                 page_num = int(img_path.stem.split('_')[-1])
-            except:
+            except Exception:
                 continue
 
             if page_num not in target_pages:
@@ -531,12 +531,12 @@ def task_multimodal_verification(file_id: str, filepath: str, page_range: str = 
                     try:
                         start, end = part.split("-")
                         target_pages.update(range(int(start), int(end) + 1))
-                    except:
+                    except Exception:
                         pass
                 else:
                     try:
                         target_pages.add(int(part))
-                    except:
+                    except Exception:
                         pass
 
             sample_images = []
@@ -545,7 +545,7 @@ def task_multimodal_verification(file_id: str, filepath: str, page_range: str = 
                     page_num = int(img.stem.split('_')[-1])
                     if page_num in target_pages:
                         sample_images.append(img)
-                except:
+                except Exception:
                     pass
 
         write_log(file_id, f"[INFO] 검증 대상: {len(sample_images)}개 페이지")
@@ -558,7 +558,7 @@ def task_multimodal_verification(file_id: str, filepath: str, page_range: str = 
 
             try:
                 page_num = int(img_path.stem.split('_')[-1])
-            except:
+            except Exception:
                 page_num = 0
 
             write_log(file_id, f"[VERIFY] P{page_num:03d} 검증 중...")
@@ -604,7 +604,7 @@ def task_multimodal_verification(file_id: str, filepath: str, page_range: str = 
                 # 업로드 파일 삭제
                 try:
                     genai.delete_file(uploaded_file.name)
-                except:
+                except Exception:
                     pass
 
             except Exception as e:

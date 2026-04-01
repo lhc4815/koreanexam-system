@@ -520,21 +520,93 @@ from storage_backend import (
 # =============================================================================
 # 유틸리티 함수
 # =============================================================================
+
+import html as html_lib
+
+STATUS_MAP = {
+    "Ready": ("ready", "대기"),
+    "Extracting": ("processing", "추출중"),
+    "Verifying": ("processing", "검증중"),
+    "Converting": ("processing", "변환중"),
+    "Extracted": ("success", "추출완료"),
+    "Modified": ("warning", "수정됨"),
+    "Done": ("success", "완료"),
+    "Stopped": ("warning", "중단"),
+    "Stopping": ("warning", "중단중"),
+    "Error": ("error", "오류"),
+}
+
+STATUS_KR = {k: v[1] for k, v in STATUS_MAP.items()}
+
+
 def get_status_badge(status: str) -> str:
-    config = {
-        "Ready": ("ready", "대기"),
-        "Extracting": ("processing", "추출중"),
-        "Verifying": ("processing", "검증중"),
-        "Converting": ("processing", "변환중"),
-        "Extracted": ("success", "추출완료"),
-        "Modified": ("warning", "수정됨"),
-        "Done": ("success", "완료"),
-        "Stopped": ("warning", "중단"),
-        "Stopping": ("warning", "중단중"),
-        "Error": ("error", "오류")
-    }
-    style, label = config.get(status, ("ready", status))
+    style, label = STATUS_MAP.get(status, ("ready", status))
     return f'<span class="badge badge-{style}">{label}</span>'
+
+
+def escape_html(text) -> str:
+    """HTML 특수문자 이스케이프"""
+    if not text:
+        return ""
+    return html_lib.escape(str(text))
+
+
+def format_doc_label(item: dict) -> str:
+    """문서 선택 드롭다운용 통합 라벨 생성.
+    예: '2024년 4월 고3 국어 모의고사 [추출완료]'
+    """
+    parts = []
+    year = item.get("year", "") or ""
+    month = item.get("month", "") or ""
+    semester = item.get("semester", "") or ""
+    grade = item.get("grade", "") or ""
+    subject = item.get("subject", "") or ""
+    exam_type = item.get("exam_type", "") or ""
+    school = item.get("school", "") or ""
+    status = item.get("status", "Ready")
+
+    if year:
+        parts.append(f"{year}년")
+    if month:
+        parts.append(f"{month}월")
+    elif semester:
+        parts.append(semester)
+    if grade:
+        parts.append(grade)
+    if subject:
+        parts.append(subject)
+    if exam_type:
+        parts.append(exam_type)
+    if school:
+        parts.append(school)
+
+    label = " ".join(parts) if parts else item.get("filename", item.get("file_id", "문서"))
+    status_label = STATUS_KR.get(status, status)
+    return f"{label} [{status_label}]"
+
+
+def get_doc_options(db: list, status_filter: list = None) -> dict:
+    """DB 목록에서 {label: file_id} 딕셔너리 생성."""
+    if status_filter:
+        items = [d for d in db if d.get("status") in status_filter]
+    else:
+        items = db
+    return {format_doc_label(item): item["file_id"] for item in items}
+
+
+def load_json_cached(file_id: str) -> dict:
+    """JSON 데이터를 세션 상태에 캐시하여 로드."""
+    cache_key = f"_json_cache_{file_id}"
+    if cache_key not in st.session_state:
+        st.session_state[cache_key] = load_json_data(file_id)
+    return st.session_state[cache_key]
+
+
+def invalidate_json_cache(file_id: str):
+    """캐시된 JSON 데이터 무효화."""
+    cache_key = f"_json_cache_{file_id}"
+    if cache_key in st.session_state:
+        del st.session_state[cache_key]
 
 
 def render_log(content: str, title: str = "처리 로그") -> str:
@@ -559,6 +631,28 @@ def render_stat_card(value: str, label: str) -> str:
         <div class="stat-label">{label}</div>
     </div>
     '''
+
+
+# =============================================================================
+# 세션 상태 조기 초기화 (탭 진입 순서 무관하게 안전)
+# =============================================================================
+if 'exam_selected_questions' not in st.session_state:
+    st.session_state.exam_selected_questions = []
+if 'exam_passages_cache' not in st.session_state:
+    st.session_state.exam_passages_cache = {}
+if 'exam_info' not in st.session_state:
+    st.session_state.exam_info = {
+        'layout_type': '수능형',
+        'title': '2026학년도 대학수학능력시험 문제지',
+        'subject': '국어 영역',
+        'session': '제1교시',
+        'form_type': '홀수형',
+        'school_name': '',
+        'exam_name': '',
+        'grade': '',
+        'date': '',
+        'time_limit': ''
+    }
 
 
 # =============================================================================
@@ -629,11 +723,7 @@ if selected == "대시보드":
 
         recent = df.sort_values('last_updated', ascending=False).head(10)
 
-        status_kr = {
-            "Ready": "대기", "Extracting": "추출중", "Verifying": "검증중",
-            "Converting": "변환중", "Extracted": "추출완료", "Modified": "수정됨",
-            "Done": "완료", "Stopped": "중단", "Stopping": "중단중", "Error": "오류"
-        }
+        status_kr = STATUS_KR
 
         table_rows = []
         for _, row in recent.iterrows():
@@ -963,13 +1053,15 @@ elif selected == "데이터 편집":
         </div>
         ''', unsafe_allow_html=True)
     else:
-        options = {f"{item.get('subject', item['filename'])} ({item['filename']})": item['file_id'] for item in editable}
+        options = get_doc_options(editable)
         selected_doc = st.selectbox("문서 선택", list(options.keys()))
         file_id = options[selected_doc]
 
-        data = load_json_data(file_id)
+        data = load_json_cached(file_id)
 
-        if data:
+        if not data:
+            st.error(f"데이터를 불러올 수 없습니다. (ID: {file_id})")
+        else:
             tab1, tab2, tab3 = st.tabs(["문항", "지문", "메타정보"])
 
             with tab1:
@@ -1111,9 +1203,8 @@ elif selected == "데이터 편집":
 
                 update_json_manual(file_id, new_questions, new_passages, new_meta)
                 st.success("저장되었습니다.")
+                invalidate_json_cache(file_id)
                 st.rerun()
-        else:
-            st.error("데이터를 불러올 수 없습니다.")
 
 
 # =============================================================================
@@ -1137,13 +1228,15 @@ elif selected == "문서 뷰어":
         </div>
         ''', unsafe_allow_html=True)
     else:
-        options = {f"{item.get('subject', item['filename'])} ({item['filename']})": item['file_id'] for item in viewable}
+        options = get_doc_options(viewable)
         selected_doc = st.selectbox("문서 선택", list(options.keys()))
         file_id = options[selected_doc]
 
-        data = load_json_data(file_id)
+        data = load_json_cached(file_id)
 
-        if data:
+        if not data:
+            st.error(f"데이터를 불러올 수 없습니다. (ID: {file_id}) 추출이 정상 완료되었는지 확인해주세요.")
+        else:
             meta = data.get("meta", {})
             questions = data.get("questions", [])
             passages = data.get("passages", [])
@@ -1188,13 +1281,6 @@ elif selected == "문서 뷰어":
             st.markdown("<div style='height:0.5rem;'></div>", unsafe_allow_html=True)
 
             import re
-            import html as html_lib  # HTML 이스케이프용
-
-            def escape_html(text):
-                """HTML 특수문자 이스케이프 (단, 이미 있는 HTML 태그는 유지하지 않음)"""
-                if not text:
-                    return ""
-                return html_lib.escape(str(text))
 
             view_mode = st.radio(
                 "보기 모드",
@@ -1397,8 +1483,6 @@ elif selected == "문서 뷰어":
                                 q_stem = escape_html(q.get('q_stem', '')).replace('\n', '<br/>')
                                 card_html = f'<div class="q-card"><span class="q-num">{q.get("q_num", "?")}번</span><div class="q-stem">{q_stem}</div>{ref_html}<div>{choices_html}</div></div>'
                                 st.markdown(card_html, unsafe_allow_html=True)
-        else:
-            st.error("데이터를 불러올 수 없습니다.")
 
 # =============================================================================
 # 6. 시험지구성
@@ -1645,24 +1729,7 @@ elif selected == "시험지구성":
         selected_tmpl_name = st.selectbox("양식 선택", list(tmpl_options.keys()), key="compose_template_select")
         active_template = get_template(tmpl_options[selected_tmpl_name]) if selected_tmpl_name else None
 
-        # 세션 상태 초기화
-        if 'exam_selected_questions' not in st.session_state:
-            st.session_state.exam_selected_questions = []
-        if 'exam_passages_cache' not in st.session_state:
-            st.session_state.exam_passages_cache = {}
-        if 'exam_info' not in st.session_state:
-            st.session_state.exam_info = {
-                'layout_type': '수능형',
-                'title': '2026학년도 대학수학능력시험 문제지',
-                'subject': '국어 영역',
-                'session': '제1교시',
-                'form_type': '홀수형',
-                'school_name': '',
-                'exam_name': '',
-                'grade': '',
-                'date': '',
-                'time_limit': ''
-            }
+        # 세션 상태는 앱 상단에서 초기화됨
 
         # 양식에서 기본값 가져오기
         if active_template:
@@ -1716,16 +1783,13 @@ elif selected == "시험지구성":
             available_docs = [item for item in all_db if item['status'] in ['Extracted', 'Modified', 'Done']]
 
             if available_docs:
-                file_options = {}
-                for item in available_docs:
-                    label = f"{item.get('subject', '제목없음')} - {item.get('exam_type', '')} ({item['file_id']})"
-                    file_options[label] = item['file_id']
+                file_options = get_doc_options(available_docs)
 
                 selected_file = st.selectbox("문서 선택", list(file_options.keys()), key="exam_file_select")
 
                 if selected_file:
                     file_id = file_options[selected_file]
-                    data = load_json_data(file_id)
+                    data = load_json_cached(file_id)
 
                     if data:
                         questions = data.get("questions", [])
@@ -1739,75 +1803,123 @@ elif selected == "시험지구성":
                         selected_category = st.selectbox("카테고리 필터", ["전체"] + categories, key="exam_category_filter")
 
                         filtered_questions = questions if selected_category == "전체" else [q for q in questions if q.get('category') == selected_category]
+                        sorted_filtered = sorted(filtered_questions, key=lambda x: int(x.get('q_num', 0)) if str(x.get('q_num', 0)).isdigit() else 0)
 
-                        st.markdown(f"**{len(filtered_questions)}개 문항**")
+                        # 전체/카테고리 일괄 선택 버튼
+                        btn_col1, btn_col2 = st.columns(2)
+                        with btn_col1:
+                            if st.button(f"전체 추가 ({len(sorted_filtered)}문항)", key="add_all_q", use_container_width=True):
+                                existing_ids = set(sq['id'] for sq in st.session_state.exam_selected_questions)
+                                added = 0
+                                for q_idx, q in enumerate(sorted_filtered):
+                                    q_id = f"{file_id}_{q.get('page_num',0)}_{q.get('q_num','?')}_{q_idx}"
+                                    if q_id not in existing_ids:
+                                        st.session_state.exam_selected_questions.append({'id': q_id, 'file_id': file_id, 'question_data': q})
+                                        added += 1
+                                if added:
+                                    st.rerun()
+                        with btn_col2:
+                            if st.button("선택 초기화", key="clear_checks", use_container_width=True):
+                                for k in list(st.session_state.keys()):
+                                    if k.startswith("chk_"):
+                                        del st.session_state[k]
+                                st.rerun()
 
-                        for q_idx, q in enumerate(sorted(filtered_questions, key=lambda x: int(x.get('q_num', 0)) if str(x.get('q_num', 0)).isdigit() else 0)):
+                        st.markdown(f"**{len(sorted_filtered)}개 문항** — 체크 후 하단 '선택 추가' 클릭")
+
+                        # 체크박스 기반 문항 목록
+                        check_states = {}
+                        for q_idx, q in enumerate(sorted_filtered):
                             q_num = q.get('q_num', '?')
-                            q_stem = q.get('q_stem', '')[:50] + "..." if len(q.get('q_stem', '')) > 50 else q.get('q_stem', '')
+                            q_stem_raw = q.get('q_stem', '') or ''
+                            q_stem = q_stem_raw[:60] + "..." if len(q_stem_raw) > 60 else q_stem_raw
                             q_category = q.get('category', '')
-                            q_page = q.get('page_num', 0)
+                            score = q.get('score') or q.get('points') or ''
+                            score_str = f" [{score}점]" if score else ""
+                            q_id = f"{file_id}_{q.get('page_num',0)}_{q_num}_{q_idx}"
+                            is_already = any(sq['id'] == q_id for sq in st.session_state.exam_selected_questions)
 
-                            q_id = f"{file_id}_{q_page}_{q_num}_{q_idx}"
-                            is_selected = any(sq['id'] == q_id for sq in st.session_state.exam_selected_questions)
+                            label = f"{q_num}번 ({q_category}{score_str}) — {q_stem}"
+                            if is_already:
+                                st.markdown(f"<div style='padding:4px 8px;background:#d4edda;border-radius:4px;margin-bottom:4px;font-size:0.82rem;color:#155724;'>✓ {escape_html(label)}</div>", unsafe_allow_html=True)
+                            else:
+                                check_states[q_id] = st.checkbox(label, key=f"chk_{q_id}", value=False)
 
-                            col_a, col_b = st.columns([4, 1])
-                            with col_a:
-                                st.markdown(f"<div style='padding:0.5rem;background:#f8f9fa;border-radius:4px;margin-bottom:0.5rem;font-size:0.85rem;color:#212529;'><strong>{q_num}번</strong> <span style='color:#6c757d;'>({q_category})</span><br/>{q_stem}</div>", unsafe_allow_html=True)
-                            with col_b:
-                                if is_selected:
-                                    st.markdown("<span style='color:#28a745;'>선택됨</span>", unsafe_allow_html=True)
-                                else:
-                                    if st.button("추가", key=f"add_{q_id}"):
-                                        # 문항 원본 dict 그대로 저장 (passage_id 포함)
-                                        st.session_state.exam_selected_questions.append({
-                                            'id': q_id,
-                                            'file_id': file_id,
-                                            'question_data': q,
-                                        })
-                                        st.rerun()
+                        # 체크된 문항 일괄 추가
+                        checked_ids = [qid for qid, checked in check_states.items() if checked]
+                        if checked_ids:
+                            if st.button(f"선택 추가 ({len(checked_ids)}문항)", type="primary", use_container_width=True, key="add_checked"):
+                                existing_ids = set(sq['id'] for sq in st.session_state.exam_selected_questions)
+                                for q_idx, q in enumerate(sorted_filtered):
+                                    q_id = f"{file_id}_{q.get('page_num',0)}_{q.get('q_num','?')}_{q_idx}"
+                                    if q_id in checked_ids and q_id not in existing_ids:
+                                        st.session_state.exam_selected_questions.append({'id': q_id, 'file_id': file_id, 'question_data': q})
+                                # 체크 상태 초기화
+                                for k in list(st.session_state.keys()):
+                                    if k.startswith("chk_"):
+                                        del st.session_state[k]
+                                st.rerun()
+
             else:
                 st.info("추출된 문서가 없습니다. 먼저 데이터 처리를 진행해주세요.")
 
             st.markdown('</div>', unsafe_allow_html=True)
 
-        # 오른쪽: 선택된 문항
+        # 오른쪽: 선택된 문항 (재번호 + 배점 합계)
         with right_col:
             st.markdown('<div class="content-card"><h4 style="margin:0 0 1rem 0;color:#212529;">선택된 문항</h4>', unsafe_allow_html=True)
 
             if st.session_state.exam_selected_questions:
-                st.markdown(f"**{len(st.session_state.exam_selected_questions)}개 문항 선택됨**")
+                total_score = sum(sq['question_data'].get('score') or sq['question_data'].get('points') or 0 for sq in st.session_state.exam_selected_questions)
+                score_text = f" / 총 {total_score}점" if total_score else ""
+                st.markdown(f"**{len(st.session_state.exam_selected_questions)}개 문항{score_text}**")
+
+                # 원본 번호 유지 옵션
+                keep_original = st.checkbox("원본 문항번호 유지", value=False, key="keep_original_num",
+                    help="체크 해제 시 PDF에서 1번부터 자동 재번호됩니다")
 
                 for idx, sq in enumerate(st.session_state.exam_selected_questions):
                     qd = sq['question_data']
-                    col_a, col_b, col_c, col_d = st.columns([3, 1, 1, 1])
+                    orig_num = qd.get('q_num', '?')
+                    new_num = orig_num if keep_original else idx + 1
+                    q_stem_short = (qd.get('q_stem', '') or '')[:35]
+                    if len(qd.get('q_stem', '') or '') > 35:
+                        q_stem_short += "..."
+                    cat = qd.get('category', '')
+                    score = qd.get('score') or qd.get('points') or ''
+                    score_str = f" {score}점" if score else ""
+
+                    # 번호 표시: 재번호 → (원본)
+                    if keep_original:
+                        num_display = f"<strong>{orig_num}번</strong>"
+                    else:
+                        num_display = f"<strong>{new_num}번</strong> <span style='color:#999;font-size:0.75rem;'>(원본:{orig_num})</span>"
+
+                    col_a, col_b, col_c, col_d = st.columns([4, 1, 1, 1])
                     with col_a:
-                        q_stem_short = (qd.get('q_stem', '') or '')[:40]
-                        if len(qd.get('q_stem', '') or '') > 40:
-                            q_stem_short += "..."
-                        st.markdown(f"<div style='padding:0.5rem;background:#e3f2fd;border-radius:4px;font-size:0.85rem;color:#212529;'><strong>{idx+1}.</strong> ({qd.get('q_num','?')}번) {q_stem_short}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div style='padding:5px 8px;background:#e3f2fd;border-radius:4px;font-size:0.82rem;color:#212529;'>{num_display} <span style='color:#667eea;'>{cat}</span>{score_str}<br/><span style='color:#555;'>{escape_html(q_stem_short)}</span></div>", unsafe_allow_html=True)
                     with col_b:
-                        if idx > 0:
-                            if st.button("^", key=f"up_{sq['id']}"):
-                                st.session_state.exam_selected_questions[idx], st.session_state.exam_selected_questions[idx-1] = st.session_state.exam_selected_questions[idx-1], st.session_state.exam_selected_questions[idx]
-                                st.rerun()
+                        if idx > 0 and st.button("↑", key=f"up_{sq['id']}"):
+                            lst = st.session_state.exam_selected_questions
+                            lst[idx], lst[idx-1] = lst[idx-1], lst[idx]
+                            st.rerun()
                     with col_c:
-                        if idx < len(st.session_state.exam_selected_questions) - 1:
-                            if st.button("v", key=f"down_{sq['id']}"):
-                                st.session_state.exam_selected_questions[idx], st.session_state.exam_selected_questions[idx+1] = st.session_state.exam_selected_questions[idx+1], st.session_state.exam_selected_questions[idx]
-                                st.rerun()
+                        if idx < len(st.session_state.exam_selected_questions) - 1 and st.button("↓", key=f"down_{sq['id']}"):
+                            lst = st.session_state.exam_selected_questions
+                            lst[idx], lst[idx+1] = lst[idx+1], lst[idx]
+                            st.rerun()
                     with col_d:
-                        if st.button("x", key=f"remove_{sq['id']}"):
+                        if st.button("✕", key=f"remove_{sq['id']}"):
                             st.session_state.exam_selected_questions.pop(idx)
                             st.rerun()
 
-                st.markdown("<div style='height:1rem;'></div>", unsafe_allow_html=True)
+                st.markdown("<div style='height:0.5rem;'></div>", unsafe_allow_html=True)
 
                 if st.button("전체 삭제", key="clear_all"):
                     st.session_state.exam_selected_questions = []
                     st.rerun()
             else:
-                st.info("왼쪽에서 문항을 선택해주세요.")
+                st.info("왼쪽에서 문항을 선택해주세요.\n\n체크박스로 여러 문항을 한 번에 선택할 수 있습니다.")
 
             st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1881,8 +1993,14 @@ elif selected == "시험지구성":
                         layout_type="school",
                     )
 
-                # 선택된 문항의 question_data 리스트 추출
-                selected_q_list = [sq['question_data'] for sq in st.session_state.exam_selected_questions]
+                # 선택된 문항의 question_data 리스트 추출 (재번호 적용)
+                keep_orig = st.session_state.get("keep_original_num", False)
+                selected_q_list = []
+                for idx, sq in enumerate(st.session_state.exam_selected_questions):
+                    q_copy = {**sq['question_data']}
+                    if not keep_orig:
+                        q_copy['q_num'] = idx + 1
+                    selected_q_list.append(q_copy)
 
                 # 관련 passages 수집 (캐시 + 필요시 재로드)
                 all_passages = []
@@ -1891,7 +2009,7 @@ elif selected == "시험지구성":
                     if fid in st.session_state.exam_passages_cache:
                         all_passages.extend(st.session_state.exam_passages_cache[fid])
                     else:
-                        fdata = load_json_data(fid)
+                        fdata = load_json_cached(fid)
                         if fdata:
                             passages_data = fdata.get("passages", [])
                             st.session_state.exam_passages_cache[fid] = passages_data
