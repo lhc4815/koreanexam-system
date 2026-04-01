@@ -1154,42 +1154,36 @@ elif selected == "문서 뷰어":
             doc_info_html = f'<div class="content-card"><div style="display:flex;justify-content:space-between;align-items:center;"><div><h3 style="margin:0;color:#212529;">{meta.get("subject", "제목 없음")}</h3><p style="margin:0.5rem 0 0 0;color:#6c757d;font-size:0.875rem;">{meta.get("exam_type", "")} {meta.get("year", "")} {meta.get("grade", "")}</p></div><div style="text-align:right;"><span class="badge badge-{badge_class}">{badge_text}</span><p style="margin:0.5rem 0 0 0;color:#6c757d;font-size:0.75rem;">문항 {len(questions)}개 | 지문 {len(passages)}개</p></div></div></div>'
             st.markdown(doc_info_html, unsafe_allow_html=True)
 
-            # ── 시험지 PDF 다운로드 (원클릭) ──
-            from exam_pdf_generator import generate_exam_pdf, ExamPaperConfig
-            dl_col1, dl_col2 = st.columns([1, 1])
-            with dl_col1:
-                if st.button("내신형 시험지 PDF 다운로드", key="viewer_school_pdf", use_container_width=True, type="primary"):
-                    with st.spinner("PDF 생성 중..."):
-                        school_config = ExamPaperConfig(
-                            subject=meta.get("subject", "국어"),
-                            school_name=meta.get("school", ""),
-                            exam_name=f"{meta.get('year', '')} {meta.get('exam_type', '')}",
-                            grade=meta.get("grade", ""),
-                            exam_date="",
-                            time_limit="",
-                            layout_type="school",
-                        )
-                        sorted_questions = sorted(questions, key=lambda x: int(x.get('q_num', 0)) if str(x.get('q_num', 0)).isdigit() else 0)
-                        pdf_bytes = generate_exam_pdf(school_config, sorted_questions, passages)
-                    fname = f"{meta.get('school', '시험지')}_{meta.get('exam_type', '')}_{meta.get('subject', '국어')}.pdf".replace(' ', '_')
-                    st.download_button("PDF 다운로드", data=pdf_bytes, file_name=fname, mime="application/pdf", use_container_width=True)
-                    st.success(f"PDF 생성 완료! ({len(questions)}문항, {len(passages)}지문)")
+            # ── 시험지 PDF 다운로드 (양식 선택) ──
+            from exam_pdf_generator import generate_exam_pdf, generate_exam_pdf_from_template, ExamPaperConfig
+            from exam_templates import get_all_templates, get_template, template_to_config
 
+            viewer_templates = get_all_templates()
+            vt_options = {t["name"]: t["template_id"] for t in viewer_templates}
+
+            dl_col1, dl_col2 = st.columns([2, 1])
+            with dl_col1:
+                viewer_tmpl_name = st.selectbox("양식 선택", list(vt_options.keys()), key="viewer_tmpl_select")
             with dl_col2:
-                if st.button("수능형 시험지 PDF 다운로드", key="viewer_suneung_pdf", use_container_width=True):
-                    with st.spinner("PDF 생성 중..."):
-                        suneung_config = ExamPaperConfig(
-                            title=f"{meta.get('year', '')}학년도 {meta.get('exam_type', '시험')} 문제지",
-                            subject=meta.get("subject", "국어 영역"),
-                            session="제1교시",
-                            form_type="홀수형",
-                            layout_type="suneung",
-                        )
-                        sorted_questions = sorted(questions, key=lambda x: int(x.get('q_num', 0)) if str(x.get('q_num', 0)).isdigit() else 0)
-                        pdf_bytes = generate_exam_pdf(suneung_config, sorted_questions, passages)
-                    fname = f"수능형_{meta.get('exam_type', '')}_{meta.get('subject', '국어')}.pdf".replace(' ', '_')
-                    st.download_button("PDF 다운로드", data=pdf_bytes, file_name=fname, mime="application/pdf", use_container_width=True)
-                    st.success(f"PDF 생성 완료! ({len(questions)}문항, {len(passages)}지문)")
+                st.markdown("<div style='height:1.8rem;'></div>", unsafe_allow_html=True)
+                pdf_gen_btn = st.button("시험지 PDF 생성", key="viewer_pdf_gen", use_container_width=True, type="primary")
+
+            if pdf_gen_btn:
+                with st.spinner("PDF 생성 중..."):
+                    selected_tmpl = get_template(vt_options[viewer_tmpl_name])
+                    overrides = {
+                        "subject": meta.get("subject", "국어"),
+                        "school_name": meta.get("school", ""),
+                        "exam_name": f"{meta.get('year', '')} {meta.get('exam_type', '')}".strip(),
+                        "grade": meta.get("grade", ""),
+                        "title": f"{meta.get('year', '')}학년도 {meta.get('exam_type', '시험')} 문제지",
+                    }
+                    tmpl_cfg = template_to_config(selected_tmpl, overrides)
+                    sorted_questions = sorted(questions, key=lambda x: int(x.get('q_num', 0)) if str(x.get('q_num', 0)).isdigit() else 0)
+                    pdf_bytes = generate_exam_pdf_from_template(tmpl_cfg, sorted_questions, passages)
+                fname = f"시험지_{meta.get('exam_type', '')}_{meta.get('subject', '국어')}.pdf".replace(' ', '_')
+                st.download_button("PDF 다운로드", data=pdf_bytes, file_name=fname, mime="application/pdf", use_container_width=True)
+                st.success(f"PDF 생성 완료! ({len(questions)}문항, {len(passages)}지문) — 양식: {viewer_tmpl_name}")
 
             st.markdown("<div style='height:0.5rem;'></div>", unsafe_allow_html=True)
 
@@ -1410,277 +1404,447 @@ elif selected == "문서 뷰어":
 # 6. 시험지구성
 # =============================================================================
 elif selected == "시험지구성":
-    from exam_pdf_generator import generate_exam_pdf, ExamPaperConfig
+    from exam_pdf_generator import generate_exam_pdf, generate_exam_pdf_from_template, ExamPaperConfig
+    from exam_templates import (
+        get_all_templates, get_template, save_template,
+        delete_template, duplicate_template, template_to_config,
+    )
 
     st.markdown('<div class="page-header"><div class="page-title">시험지구성</div><div class="page-desc">문항을 선택하여 시험지 PDF를 생성합니다</div></div>', unsafe_allow_html=True)
 
-    # 세션 상태 초기화
-    if 'exam_selected_questions' not in st.session_state:
-        st.session_state.exam_selected_questions = []  # [{id, file_id, question_data(원본 dict)}]
-    if 'exam_passages_cache' not in st.session_state:
-        st.session_state.exam_passages_cache = {}  # {file_id: passages_list}
-    if 'exam_info' not in st.session_state:
-        st.session_state.exam_info = {
-            'layout_type': '수능형',
-            'title': '2026학년도 대학수학능력시험 문제지',
-            'subject': '국어 영역',
-            'session': '제1교시',
-            'form_type': '홀수형',
-            'school_name': '',
-            'exam_name': '',
-            'grade': '',
-            'date': '',
-            'time_limit': ''
-        }
+    compose_tab, template_tab = st.tabs(["시험지 만들기", "양식 관리"])
 
-    # 상단: 시험지 정보 입력
-    st.markdown('<div class="content-card"><h4 style="margin:0 0 1rem 0;color:#212529;">시험지 정보</h4>', unsafe_allow_html=True)
+    # =================================================================
+    # 탭 2: 양식 관리
+    # =================================================================
+    with template_tab:
+        st.markdown("#### 시험지 양식 관리")
+        st.info("양식을 생성/편집하여 시험지 PDF의 레이아웃, 폰트, 여백 등을 자유롭게 커스터마이징할 수 있습니다.")
 
-    # 레이아웃 선택
-    layout_choice = st.radio("레이아웃", ["수능형", "내신형"], horizontal=True, key="layout_radio")
-    st.session_state.exam_info['layout_type'] = layout_choice
+        templates = get_all_templates()
 
-    if layout_choice == "수능형":
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.session_state.exam_info['title'] = st.text_input("시험 제목", value=st.session_state.exam_info['title'], placeholder="예: 2026학년도 대학수학능력시험 문제지")
-            st.session_state.exam_info['subject'] = st.text_input("영역명", value=st.session_state.exam_info['subject'], placeholder="예: 국어 영역")
-        with col2:
-            st.session_state.exam_info['session'] = st.text_input("교시", value=st.session_state.exam_info['session'], placeholder="예: 제1교시")
-            st.session_state.exam_info['form_type'] = st.text_input("형번호", value=st.session_state.exam_info['form_type'], placeholder="예: 홀수형")
-        with col3:
-            st.markdown("<div style='height:3.5rem;'></div>", unsafe_allow_html=True)
-            st.markdown("""
-            <div style="background:#f8f9fa;padding:0.75rem;border-radius:8px;font-size:0.8rem;color:#6c757d;">
-            수능/모의고사 스타일 2단 레이아웃.<br/>
-            지문과 문항이 함께 배치됩니다.
-            </div>
-            """, unsafe_allow_html=True)
-    else:
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.session_state.exam_info['school_name'] = st.text_input("학교명", value=st.session_state.exam_info['school_name'], placeholder="예: ○○고등학교")
-            st.session_state.exam_info['subject'] = st.text_input("과목", value=st.session_state.exam_info['subject'], placeholder="예: 국어")
-        with col2:
-            st.session_state.exam_info['exam_name'] = st.text_input("시험명", value=st.session_state.exam_info['exam_name'], placeholder="예: 2026학년도 1학기 중간고사")
-            st.session_state.exam_info['grade'] = st.text_input("학년/반", value=st.session_state.exam_info['grade'], placeholder="예: 1학년")
-        with col3:
-            st.session_state.exam_info['date'] = st.text_input("시험일", value=st.session_state.exam_info['date'], placeholder="예: 2026.04.25")
-            st.session_state.exam_info['time_limit'] = st.text_input("시험시간", value=st.session_state.exam_info['time_limit'], placeholder="예: 50분")
+        # 양식 목록
+        tmpl_col1, tmpl_col2 = st.columns([3, 1])
+        with tmpl_col2:
+            if st.button("새 양식 만들기", use_container_width=True, type="primary"):
+                st.session_state["editing_template"] = {
+                    "template_id": "",
+                    "name": "새 양식",
+                    "description": "",
+                    "is_default": False,
+                    "layout": {"columns": 1, "page_size": "A4", "margin_top": 12, "margin_bottom": 10, "margin_left": 15, "margin_right": 15, "gutter": 0},
+                    "header": {"style": "school", "line_1": "{school_name}", "line_2": "{exam_name}", "line_3": "과목: {subject}  |  학년: {grade}", "show_border": True},
+                    "footer": {"show_page_number": True, "custom_text": ""},
+                    "fonts": {"passage_size": 10, "passage_leading": 15, "stem_size": 11, "stem_leading": 16, "choice_size": 10, "choice_leading": 14, "box_title_size": 10, "box_body_size": 9.5},
+                    "spacing": {"before_question": 12, "after_question": 3, "choice_gap": 2, "passage_indent": 10},
+                    "exam_info": {"school_name": "", "exam_name": "", "subject": "국어", "grade": "", "exam_date": "", "time_limit": ""},
+                }
 
-    st.markdown('</div>', unsafe_allow_html=True)
+        with tmpl_col1:
+            st.markdown(f"**등록된 양식: {len(templates)}개**")
 
-    st.markdown("<div style='height:1rem;'></div>", unsafe_allow_html=True)
+        for tmpl in templates:
+            cols_label = "2단" if tmpl.get("layout", {}).get("columns", 1) == 2 else "1단"
+            header_style = tmpl.get("header", {}).get("style", "school")
+            default_badge = " (기본)" if tmpl.get("is_default") else ""
 
-    # 2단 레이아웃: 문항 선택 | 선택된 문항
-    left_col, right_col = st.columns([1, 1])
+            with st.expander(f"**{tmpl['name']}**{default_badge} — {cols_label} / {header_style}"):
+                st.caption(tmpl.get("description", ""))
 
-    # 왼쪽: 문항 선택
-    with left_col:
-        st.markdown('<div class="content-card"><h4 style="margin:0 0 1rem 0;color:#212529;">문항 선택</h4>', unsafe_allow_html=True)
+                # 주요 설정 미리보기
+                fonts = tmpl.get("fonts", {})
+                layout = tmpl.get("layout", {})
+                prev_col1, prev_col2, prev_col3 = st.columns(3)
+                prev_col1.metric("단수", f"{layout.get('columns', 1)}단")
+                prev_col2.metric("발문 폰트", f"{fonts.get('stem_size', 11)}pt")
+                prev_col3.metric("좌우 여백", f"{layout.get('margin_left', 15)}mm")
 
-        all_db = get_db()
-        available_docs = [item for item in all_db if item['status'] in ['Extracted', 'Modified', 'Done']]
+                btn_col1, btn_col2, btn_col3 = st.columns(3)
+                with btn_col1:
+                    if st.button("편집", key=f"edit_{tmpl['template_id']}", use_container_width=True):
+                        st.session_state["editing_template"] = {**tmpl}
+                with btn_col2:
+                    if st.button("복제", key=f"dup_{tmpl['template_id']}", use_container_width=True):
+                        new_id = duplicate_template(tmpl["template_id"])
+                        if new_id:
+                            st.success(f"복제 완료!")
+                            st.rerun()
+                with btn_col3:
+                    if tmpl.get("is_default"):
+                        st.button("삭제 불가", key=f"del_{tmpl['template_id']}", disabled=True, use_container_width=True)
+                    else:
+                        if st.button("삭제", key=f"del_{tmpl['template_id']}", use_container_width=True):
+                            delete_template(tmpl["template_id"])
+                            st.success("삭제 완료!")
+                            st.rerun()
 
-        if available_docs:
-            file_options = {}
-            for item in available_docs:
-                label = f"{item.get('subject', '제목없음')} - {item.get('exam_type', '')} ({item['file_id']})"
-                file_options[label] = item['file_id']
+        # 양식 편집 폼
+        if "editing_template" in st.session_state:
+            st.markdown("---")
+            tmpl_edit = st.session_state["editing_template"]
+            is_new = not tmpl_edit.get("template_id")
+            edit_title = "새 양식 만들기" if is_new else f"양식 편집: {tmpl_edit.get('name', '')}"
+            st.markdown(f"#### {edit_title}")
 
-            selected_file = st.selectbox("문서 선택", list(file_options.keys()), key="exam_file_select")
+            # 기본 정보
+            tmpl_edit["name"] = st.text_input("양식 이름", value=tmpl_edit.get("name", ""), key="tmpl_name")
+            tmpl_edit["description"] = st.text_input("설명", value=tmpl_edit.get("description", ""), key="tmpl_desc")
 
-            if selected_file:
-                file_id = file_options[selected_file]
-                data = load_json_data(file_id)
+            st.markdown("##### 레이아웃")
+            layout_e = tmpl_edit.setdefault("layout", {})
+            le_col1, le_col2, le_col3, le_col4 = st.columns(4)
+            with le_col1:
+                layout_e["columns"] = st.selectbox("단수", [1, 2], index=0 if layout_e.get("columns", 1) == 1 else 1, key="tmpl_cols")
+            with le_col2:
+                layout_e["margin_left"] = st.number_input("좌 여백(mm)", value=layout_e.get("margin_left", 15), min_value=5, max_value=40, key="tmpl_ml")
+                layout_e["margin_right"] = layout_e["margin_left"]  # 좌우 동일
+            with le_col3:
+                layout_e["margin_top"] = st.number_input("상 여백(mm)", value=layout_e.get("margin_top", 12), min_value=5, max_value=40, key="tmpl_mt")
+            with le_col4:
+                layout_e["margin_bottom"] = st.number_input("하 여백(mm)", value=layout_e.get("margin_bottom", 10), min_value=5, max_value=40, key="tmpl_mb")
+            if layout_e["columns"] == 2:
+                layout_e["gutter"] = st.number_input("단 간격(mm)", value=layout_e.get("gutter", 6), min_value=2, max_value=20, key="tmpl_gutter")
 
-                if data:
-                    questions = data.get("questions", [])
-                    passages = data.get("passages", [])
+            st.markdown("##### 헤더")
+            header_e = tmpl_edit.setdefault("header", {})
+            he_col1, he_col2 = st.columns(2)
+            with he_col1:
+                header_e["style"] = st.selectbox("헤더 스타일", ["school", "suneung", "minimal", "none"],
+                    index=["school", "suneung", "minimal", "none"].index(header_e.get("style", "school")), key="tmpl_hstyle")
+            with he_col2:
+                header_e["show_border"] = st.checkbox("구분선 표시", value=header_e.get("show_border", True), key="tmpl_hborder")
+            header_e["line_1"] = st.text_input("헤더 1행", value=header_e.get("line_1", ""), key="tmpl_h1",
+                help="변수: {school_name}, {exam_name}, {title}, {subject}, {grade}, {session}, {form_type}, {exam_date}, {time_limit}")
+            header_e["line_2"] = st.text_input("헤더 2행", value=header_e.get("line_2", ""), key="tmpl_h2")
+            header_e["line_3"] = st.text_input("헤더 3행", value=header_e.get("line_3", ""), key="tmpl_h3")
 
-                    # passages 캐시 (PDF 생성 시 사용)
-                    st.session_state.exam_passages_cache[file_id] = passages
+            st.markdown("##### 푸터")
+            footer_e = tmpl_edit.setdefault("footer", {})
+            fe_col1, fe_col2 = st.columns(2)
+            with fe_col1:
+                footer_e["show_page_number"] = st.checkbox("페이지 번호", value=footer_e.get("show_page_number", True), key="tmpl_fpn")
+            with fe_col2:
+                footer_e["custom_text"] = st.text_input("푸터 텍스트", value=footer_e.get("custom_text", ""), key="tmpl_ftxt")
 
-                    # 카테고리 필터
-                    categories = list(set([q.get('category', '기타') for q in questions]))
-                    selected_category = st.selectbox("카테고리 필터", ["전체"] + categories, key="exam_category_filter")
+            st.markdown("##### 폰트 크기")
+            fonts_e = tmpl_edit.setdefault("fonts", {})
+            fc1, fc2, fc3, fc4 = st.columns(4)
+            with fc1:
+                fonts_e["passage_size"] = st.number_input("지문(pt)", value=float(fonts_e.get("passage_size", 10)), min_value=6.0, max_value=16.0, step=0.5, key="tmpl_fp")
+                fonts_e["passage_leading"] = fonts_e["passage_size"] + 5
+            with fc2:
+                fonts_e["stem_size"] = st.number_input("발문(pt)", value=float(fonts_e.get("stem_size", 11)), min_value=6.0, max_value=16.0, step=0.5, key="tmpl_fs")
+                fonts_e["stem_leading"] = fonts_e["stem_size"] + 5
+            with fc3:
+                fonts_e["choice_size"] = st.number_input("선지(pt)", value=float(fonts_e.get("choice_size", 10)), min_value=6.0, max_value=16.0, step=0.5, key="tmpl_fc")
+                fonts_e["choice_leading"] = fonts_e["choice_size"] + 4
+            with fc4:
+                fonts_e["box_body_size"] = st.number_input("보기(pt)", value=float(fonts_e.get("box_body_size", 9.5)), min_value=6.0, max_value=16.0, step=0.5, key="tmpl_fb")
+                fonts_e["box_title_size"] = fonts_e["box_body_size"] + 0.5
 
-                    filtered_questions = questions if selected_category == "전체" else [q for q in questions if q.get('category') == selected_category]
+            st.markdown("##### 간격")
+            spacing_e = tmpl_edit.setdefault("spacing", {})
+            sc1, sc2, sc3 = st.columns(3)
+            with sc1:
+                spacing_e["before_question"] = st.number_input("문항 전 간격", value=int(spacing_e.get("before_question", 12)), min_value=4, max_value=30, key="tmpl_sbq")
+            with sc2:
+                spacing_e["choice_gap"] = st.number_input("선지 간격", value=int(spacing_e.get("choice_gap", 2)), min_value=0, max_value=10, key="tmpl_scg")
+            with sc3:
+                spacing_e["passage_indent"] = st.number_input("지문 들여쓰기", value=int(spacing_e.get("passage_indent", 10)), min_value=0, max_value=30, key="tmpl_spi")
 
-                    st.markdown(f"**{len(filtered_questions)}개 문항**")
+            st.markdown("---")
 
-                    for q_idx, q in enumerate(sorted(filtered_questions, key=lambda x: int(x.get('q_num', 0)) if str(x.get('q_num', 0)).isdigit() else 0)):
-                        q_num = q.get('q_num', '?')
-                        q_stem = q.get('q_stem', '')[:50] + "..." if len(q.get('q_stem', '')) > 50 else q.get('q_stem', '')
-                        q_category = q.get('category', '')
-                        q_page = q.get('page_num', 0)
+            save_col1, save_col2 = st.columns(2)
+            with save_col1:
+                if st.button("저장", use_container_width=True, type="primary", key="tmpl_save"):
+                    saved_id = save_template(tmpl_edit)
+                    st.success(f"양식 '{tmpl_edit['name']}' 저장 완료! (ID: {saved_id})")
+                    del st.session_state["editing_template"]
+                    st.rerun()
+            with save_col2:
+                if st.button("취소", use_container_width=True, key="tmpl_cancel"):
+                    del st.session_state["editing_template"]
+                    st.rerun()
 
-                        q_id = f"{file_id}_{q_page}_{q_num}_{q_idx}"
-                        is_selected = any(sq['id'] == q_id for sq in st.session_state.exam_selected_questions)
+    # =================================================================
+    # 탭 1: 시험지 만들기 (기존 시험지구성 로직)
+    # =================================================================
+    with compose_tab:
+        # 양식 선택 드롭다운
+        all_templates = get_all_templates()
+        tmpl_options = {t["name"]: t["template_id"] for t in all_templates}
+        selected_tmpl_name = st.selectbox("양식 선택", list(tmpl_options.keys()), key="compose_template_select")
+        active_template = get_template(tmpl_options[selected_tmpl_name]) if selected_tmpl_name else None
 
-                        col_a, col_b = st.columns([4, 1])
-                        with col_a:
-                            st.markdown(f"<div style='padding:0.5rem;background:#f8f9fa;border-radius:4px;margin-bottom:0.5rem;font-size:0.85rem;color:#212529;'><strong>{q_num}번</strong> <span style='color:#6c757d;'>({q_category})</span><br/>{q_stem}</div>", unsafe_allow_html=True)
-                        with col_b:
-                            if is_selected:
-                                st.markdown("<span style='color:#28a745;'>선택됨</span>", unsafe_allow_html=True)
-                            else:
-                                if st.button("추가", key=f"add_{q_id}"):
-                                    # 문항 원본 dict 그대로 저장 (passage_id 포함)
-                                    st.session_state.exam_selected_questions.append({
-                                        'id': q_id,
-                                        'file_id': file_id,
-                                        'question_data': q,
-                                    })
-                                    st.rerun()
+        # 세션 상태 초기화
+        if 'exam_selected_questions' not in st.session_state:
+            st.session_state.exam_selected_questions = []
+        if 'exam_passages_cache' not in st.session_state:
+            st.session_state.exam_passages_cache = {}
+        if 'exam_info' not in st.session_state:
+            st.session_state.exam_info = {
+                'layout_type': '수능형',
+                'title': '2026학년도 대학수학능력시험 문제지',
+                'subject': '국어 영역',
+                'session': '제1교시',
+                'form_type': '홀수형',
+                'school_name': '',
+                'exam_name': '',
+                'grade': '',
+                'date': '',
+                'time_limit': ''
+            }
+
+        # 양식에서 기본값 가져오기
+        if active_template:
+            tmpl_info = active_template.get("exam_info", {})
+            for k, v in tmpl_info.items():
+                if v and k in st.session_state.exam_info and not st.session_state.exam_info[k]:
+                    st.session_state.exam_info[k] = v
+
+        # 상단: 시험지 정보 입력
+        st.markdown('<div class="content-card"><h4 style="margin:0 0 1rem 0;color:#212529;">시험지 정보</h4>', unsafe_allow_html=True)
+
+        # 레이아웃 선택
+        layout_choice = st.radio("레이아웃", ["수능형", "내신형"], horizontal=True, key="layout_radio")
+        st.session_state.exam_info['layout_type'] = layout_choice
+
+        if layout_choice == "수능형":
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.session_state.exam_info['title'] = st.text_input("시험 제목", value=st.session_state.exam_info['title'], placeholder="예: 2026학년도 대학수학능력시험 문제지")
+                st.session_state.exam_info['subject'] = st.text_input("영역명", value=st.session_state.exam_info['subject'], placeholder="예: 국어 영역")
+            with col2:
+                st.session_state.exam_info['session'] = st.text_input("교시", value=st.session_state.exam_info['session'], placeholder="예: 제1교시")
+                st.session_state.exam_info['form_type'] = st.text_input("형번호", value=st.session_state.exam_info['form_type'], placeholder="예: 홀수형")
+            with col3:
+                st.markdown("<div style='height:3.5rem;'></div>", unsafe_allow_html=True)
+                st.markdown("<div style='background:#f8f9fa;padding:0.75rem;border-radius:8px;font-size:0.8rem;color:#6c757d;'>수능/모의고사 스타일 2단 레이아웃.<br/>지문과 문항이 함께 배치됩니다.</div>", unsafe_allow_html=True)
         else:
-            st.info("추출된 문서가 없습니다. 먼저 데이터 처리를 진행해주세요.")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.session_state.exam_info['school_name'] = st.text_input("학교명", value=st.session_state.exam_info['school_name'], placeholder="예: ○○고등학교")
+                st.session_state.exam_info['subject'] = st.text_input("과목", value=st.session_state.exam_info['subject'], placeholder="예: 국어")
+            with col2:
+                st.session_state.exam_info['exam_name'] = st.text_input("시험명", value=st.session_state.exam_info['exam_name'], placeholder="예: 2026학년도 1학기 중간고사")
+                st.session_state.exam_info['grade'] = st.text_input("학년/반", value=st.session_state.exam_info['grade'], placeholder="예: 1학년")
+            with col3:
+                st.session_state.exam_info['date'] = st.text_input("시험일", value=st.session_state.exam_info['date'], placeholder="예: 2026.04.25")
+                st.session_state.exam_info['time_limit'] = st.text_input("시험시간", value=st.session_state.exam_info['time_limit'], placeholder="예: 50분")
 
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # 오른쪽: 선택된 문항
-    with right_col:
-        st.markdown('<div class="content-card"><h4 style="margin:0 0 1rem 0;color:#212529;">선택된 문항</h4>', unsafe_allow_html=True)
+        st.markdown("<div style='height:1rem;'></div>", unsafe_allow_html=True)
 
-        if st.session_state.exam_selected_questions:
-            st.markdown(f"**{len(st.session_state.exam_selected_questions)}개 문항 선택됨**")
+        # 2단 레이아웃: 문항 선택 | 선택된 문항
+        left_col, right_col = st.columns([1, 1])
+
+        # 왼쪽: 문항 선택
+        with left_col:
+            st.markdown('<div class="content-card"><h4 style="margin:0 0 1rem 0;color:#212529;">문항 선택</h4>', unsafe_allow_html=True)
+
+            all_db = get_db()
+            available_docs = [item for item in all_db if item['status'] in ['Extracted', 'Modified', 'Done']]
+
+            if available_docs:
+                file_options = {}
+                for item in available_docs:
+                    label = f"{item.get('subject', '제목없음')} - {item.get('exam_type', '')} ({item['file_id']})"
+                    file_options[label] = item['file_id']
+
+                selected_file = st.selectbox("문서 선택", list(file_options.keys()), key="exam_file_select")
+
+                if selected_file:
+                    file_id = file_options[selected_file]
+                    data = load_json_data(file_id)
+
+                    if data:
+                        questions = data.get("questions", [])
+                        passages = data.get("passages", [])
+
+                        # passages 캐시 (PDF 생성 시 사용)
+                        st.session_state.exam_passages_cache[file_id] = passages
+
+                        # 카테고리 필터
+                        categories = list(set([q.get('category', '기타') for q in questions]))
+                        selected_category = st.selectbox("카테고리 필터", ["전체"] + categories, key="exam_category_filter")
+
+                        filtered_questions = questions if selected_category == "전체" else [q for q in questions if q.get('category') == selected_category]
+
+                        st.markdown(f"**{len(filtered_questions)}개 문항**")
+
+                        for q_idx, q in enumerate(sorted(filtered_questions, key=lambda x: int(x.get('q_num', 0)) if str(x.get('q_num', 0)).isdigit() else 0)):
+                            q_num = q.get('q_num', '?')
+                            q_stem = q.get('q_stem', '')[:50] + "..." if len(q.get('q_stem', '')) > 50 else q.get('q_stem', '')
+                            q_category = q.get('category', '')
+                            q_page = q.get('page_num', 0)
+
+                            q_id = f"{file_id}_{q_page}_{q_num}_{q_idx}"
+                            is_selected = any(sq['id'] == q_id for sq in st.session_state.exam_selected_questions)
+
+                            col_a, col_b = st.columns([4, 1])
+                            with col_a:
+                                st.markdown(f"<div style='padding:0.5rem;background:#f8f9fa;border-radius:4px;margin-bottom:0.5rem;font-size:0.85rem;color:#212529;'><strong>{q_num}번</strong> <span style='color:#6c757d;'>({q_category})</span><br/>{q_stem}</div>", unsafe_allow_html=True)
+                            with col_b:
+                                if is_selected:
+                                    st.markdown("<span style='color:#28a745;'>선택됨</span>", unsafe_allow_html=True)
+                                else:
+                                    if st.button("추가", key=f"add_{q_id}"):
+                                        # 문항 원본 dict 그대로 저장 (passage_id 포함)
+                                        st.session_state.exam_selected_questions.append({
+                                            'id': q_id,
+                                            'file_id': file_id,
+                                            'question_data': q,
+                                        })
+                                        st.rerun()
+            else:
+                st.info("추출된 문서가 없습니다. 먼저 데이터 처리를 진행해주세요.")
+
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        # 오른쪽: 선택된 문항
+        with right_col:
+            st.markdown('<div class="content-card"><h4 style="margin:0 0 1rem 0;color:#212529;">선택된 문항</h4>', unsafe_allow_html=True)
+
+            if st.session_state.exam_selected_questions:
+                st.markdown(f"**{len(st.session_state.exam_selected_questions)}개 문항 선택됨**")
+
+                for idx, sq in enumerate(st.session_state.exam_selected_questions):
+                    qd = sq['question_data']
+                    col_a, col_b, col_c, col_d = st.columns([3, 1, 1, 1])
+                    with col_a:
+                        q_stem_short = (qd.get('q_stem', '') or '')[:40]
+                        if len(qd.get('q_stem', '') or '') > 40:
+                            q_stem_short += "..."
+                        st.markdown(f"<div style='padding:0.5rem;background:#e3f2fd;border-radius:4px;font-size:0.85rem;color:#212529;'><strong>{idx+1}.</strong> ({qd.get('q_num','?')}번) {q_stem_short}</div>", unsafe_allow_html=True)
+                    with col_b:
+                        if idx > 0:
+                            if st.button("^", key=f"up_{sq['id']}"):
+                                st.session_state.exam_selected_questions[idx], st.session_state.exam_selected_questions[idx-1] = st.session_state.exam_selected_questions[idx-1], st.session_state.exam_selected_questions[idx]
+                                st.rerun()
+                    with col_c:
+                        if idx < len(st.session_state.exam_selected_questions) - 1:
+                            if st.button("v", key=f"down_{sq['id']}"):
+                                st.session_state.exam_selected_questions[idx], st.session_state.exam_selected_questions[idx+1] = st.session_state.exam_selected_questions[idx+1], st.session_state.exam_selected_questions[idx]
+                                st.rerun()
+                    with col_d:
+                        if st.button("x", key=f"remove_{sq['id']}"):
+                            st.session_state.exam_selected_questions.pop(idx)
+                            st.rerun()
+
+                st.markdown("<div style='height:1rem;'></div>", unsafe_allow_html=True)
+
+                if st.button("전체 삭제", key="clear_all"):
+                    st.session_state.exam_selected_questions = []
+                    st.rerun()
+            else:
+                st.info("왼쪽에서 문항을 선택해주세요.")
+
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown("<div style='height:1rem;'></div>", unsafe_allow_html=True)
+
+        # 하단: 미리보기 & PDF 생성
+        st.markdown('<div class="content-card"><h4 style="margin:0 0 1rem 0;color:#212529;">미리보기 & 출력</h4>', unsafe_allow_html=True)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            preview_btn = st.button("시험지 미리보기", use_container_width=True)
+        with col2:
+            layout_label = "수능형 2단" if st.session_state.exam_info['layout_type'] == '수능형' else "내신형 1단"
+            pdf_btn = st.button(f"PDF 생성 ({layout_label})", use_container_width=True, type="primary", disabled=len(st.session_state.exam_selected_questions) == 0)
+
+        if preview_btn and st.session_state.exam_selected_questions:
+            st.markdown("<div style='height:1rem;'></div>", unsafe_allow_html=True)
+
+            info = st.session_state.exam_info
+            preview_parts = []
+            if info['layout_type'] == '수능형':
+                preview_parts.append(f'<div style="border:2px solid #333;padding:2rem;background:white;max-width:800px;margin:0 auto;font-family:Noto Sans KR,sans-serif;">')
+                preview_parts.append(f'<div style="text-align:center;border-bottom:2px solid #333;padding-bottom:1rem;margin-bottom:1.5rem;">')
+                preview_parts.append(f'<p style="margin:0;color:#000;font-size:0.9rem;">{info["title"]}</p>')
+                preview_parts.append(f'<h2 style="margin:0.5rem 0;color:#000;">{info["subject"]}</h2>')
+                preview_parts.append(f'<p style="margin:0;color:#333;">{info["session"]} | {info["form_type"]}</p>')
+                preview_parts.append('</div>')
+            else:
+                preview_parts.append(f'<div style="border:2px solid #333;padding:2rem;background:white;max-width:800px;margin:0 auto;font-family:Noto Sans KR,sans-serif;">')
+                preview_parts.append(f'<div style="text-align:center;border-bottom:2px solid #333;padding-bottom:1rem;margin-bottom:1.5rem;">')
+                preview_parts.append(f'<h2 style="margin:0;color:#000;">{info["school_name"] or "○○고등학교"}</h2>')
+                preview_parts.append(f'<h3 style="margin:0.5rem 0;color:#000;">{info["exam_name"] or "시험지"}</h3>')
+                preview_parts.append(f'<p style="margin:0;color:#333;">과목: {info["subject"]} | 학년: {info["grade"]} | 시험일: {info["date"]} | 시간: {info["time_limit"]}</p>')
+                preview_parts.append('</div>')
 
             for idx, sq in enumerate(st.session_state.exam_selected_questions):
                 qd = sq['question_data']
-                col_a, col_b, col_c, col_d = st.columns([3, 1, 1, 1])
-                with col_a:
-                    q_stem_short = (qd.get('q_stem', '') or '')[:40]
-                    if len(qd.get('q_stem', '') or '') > 40:
-                        q_stem_short += "..."
-                    st.markdown(f"<div style='padding:0.5rem;background:#e3f2fd;border-radius:4px;font-size:0.85rem;color:#212529;'><strong>{idx+1}.</strong> ({qd.get('q_num','?')}번) {q_stem_short}</div>", unsafe_allow_html=True)
-                with col_b:
-                    if idx > 0:
-                        if st.button("^", key=f"up_{sq['id']}"):
-                            st.session_state.exam_selected_questions[idx], st.session_state.exam_selected_questions[idx-1] = st.session_state.exam_selected_questions[idx-1], st.session_state.exam_selected_questions[idx]
-                            st.rerun()
-                with col_c:
-                    if idx < len(st.session_state.exam_selected_questions) - 1:
-                        if st.button("v", key=f"down_{sq['id']}"):
-                            st.session_state.exam_selected_questions[idx], st.session_state.exam_selected_questions[idx+1] = st.session_state.exam_selected_questions[idx+1], st.session_state.exam_selected_questions[idx]
-                            st.rerun()
-                with col_d:
-                    if st.button("x", key=f"remove_{sq['id']}"):
-                        st.session_state.exam_selected_questions.pop(idx)
-                        st.rerun()
+                choices_html = ''.join([f'<div style="margin:0.3rem 0;color:#000;">{qd.get(f"choice_{i}", "")}</div>' for i in range(1, 6) if qd.get(f'choice_{i}')])
+                ref_html = f'<div style="background:#f5f5f5;padding:0.75rem;margin:0.5rem 0;border-left:3px solid #333;color:#000;"><strong>[보기]</strong><br/>{qd.get("reference_box", "")}</div>' if qd.get('reference_box') else ''
+                points_html = f' <span style="color:#d93025;">[{qd["points"]}점]</span>' if qd.get('points') else ''
+                preview_parts.append(f'<div style="margin-bottom:1.5rem;padding-bottom:1rem;border-bottom:1px dashed #ccc;">')
+                preview_parts.append(f'<p style="margin:0;color:#000;"><strong>{idx+1}.</strong> {qd.get("q_stem", "")}{points_html}</p>')
+                preview_parts.append(ref_html)
+                preview_parts.append(f'<div style="margin-top:0.5rem;padding-left:1rem;">{choices_html}</div>')
+                preview_parts.append('</div>')
 
-            st.markdown("<div style='height:1rem;'></div>", unsafe_allow_html=True)
+            preview_parts.append('</div>')
+            st.markdown(''.join(preview_parts), unsafe_allow_html=True)
 
-            if st.button("전체 삭제", key="clear_all"):
-                st.session_state.exam_selected_questions = []
-                st.rerun()
-        else:
-            st.info("왼쪽에서 문항을 선택해주세요.")
+        if pdf_btn and st.session_state.exam_selected_questions:
+            try:
+                info = st.session_state.exam_info
+
+                # ExamPaperConfig 생성
+                if info['layout_type'] == '수능형':
+                    config = ExamPaperConfig(
+                        title=info['title'],
+                        subject=info['subject'],
+                        session=info['session'],
+                        form_type=info['form_type'],
+                        layout_type="suneung",
+                    )
+                else:
+                    config = ExamPaperConfig(
+                        subject=info['subject'],
+                        school_name=info['school_name'],
+                        exam_name=info['exam_name'],
+                        grade=info['grade'],
+                        exam_date=info['date'],
+                        time_limit=info['time_limit'],
+                        layout_type="school",
+                    )
+
+                # 선택된 문항의 question_data 리스트 추출
+                selected_q_list = [sq['question_data'] for sq in st.session_state.exam_selected_questions]
+
+                # 관련 passages 수집 (캐시 + 필요시 재로드)
+                all_passages = []
+                seen_file_ids = set(sq['file_id'] for sq in st.session_state.exam_selected_questions)
+                for fid in seen_file_ids:
+                    if fid in st.session_state.exam_passages_cache:
+                        all_passages.extend(st.session_state.exam_passages_cache[fid])
+                    else:
+                        fdata = load_json_data(fid)
+                        if fdata:
+                            passages_data = fdata.get("passages", [])
+                            st.session_state.exam_passages_cache[fid] = passages_data
+                            all_passages.extend(passages_data)
+
+                # PDF 생성
+                pdf_bytes = generate_exam_pdf(config, selected_q_list, all_passages)
+
+                file_name = f"시험지_{info['subject']}.pdf".replace(' ', '_')
+                st.download_button(
+                    label="PDF 다운로드",
+                    data=pdf_bytes,
+                    file_name=file_name,
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+                st.success("PDF가 생성되었습니다! 위 버튼을 클릭하여 다운로드하세요.")
+
+            except Exception as e:
+                st.error(f"PDF 생성 중 오류가 발생했습니다: {str(e)}")
 
         st.markdown('</div>', unsafe_allow_html=True)
-
-    st.markdown("<div style='height:1rem;'></div>", unsafe_allow_html=True)
-
-    # 하단: 미리보기 & PDF 생성
-    st.markdown('<div class="content-card"><h4 style="margin:0 0 1rem 0;color:#212529;">미리보기 & 출력</h4>', unsafe_allow_html=True)
-
-    col1, col2 = st.columns(2)
-    with col1:
-        preview_btn = st.button("시험지 미리보기", use_container_width=True)
-    with col2:
-        layout_label = "수능형 2단" if st.session_state.exam_info['layout_type'] == '수능형' else "내신형 1단"
-        pdf_btn = st.button(f"PDF 생성 ({layout_label})", use_container_width=True, type="primary", disabled=len(st.session_state.exam_selected_questions) == 0)
-
-    if preview_btn and st.session_state.exam_selected_questions:
-        st.markdown("<div style='height:1rem;'></div>", unsafe_allow_html=True)
-
-        info = st.session_state.exam_info
-        preview_parts = []
-        if info['layout_type'] == '수능형':
-            preview_parts.append(f'<div style="border:2px solid #333;padding:2rem;background:white;max-width:800px;margin:0 auto;font-family:Noto Sans KR,sans-serif;">')
-            preview_parts.append(f'<div style="text-align:center;border-bottom:2px solid #333;padding-bottom:1rem;margin-bottom:1.5rem;">')
-            preview_parts.append(f'<p style="margin:0;color:#000;font-size:0.9rem;">{info["title"]}</p>')
-            preview_parts.append(f'<h2 style="margin:0.5rem 0;color:#000;">{info["subject"]}</h2>')
-            preview_parts.append(f'<p style="margin:0;color:#333;">{info["session"]} | {info["form_type"]}</p>')
-            preview_parts.append('</div>')
-        else:
-            preview_parts.append(f'<div style="border:2px solid #333;padding:2rem;background:white;max-width:800px;margin:0 auto;font-family:Noto Sans KR,sans-serif;">')
-            preview_parts.append(f'<div style="text-align:center;border-bottom:2px solid #333;padding-bottom:1rem;margin-bottom:1.5rem;">')
-            preview_parts.append(f'<h2 style="margin:0;color:#000;">{info["school_name"] or "○○고등학교"}</h2>')
-            preview_parts.append(f'<h3 style="margin:0.5rem 0;color:#000;">{info["exam_name"] or "시험지"}</h3>')
-            preview_parts.append(f'<p style="margin:0;color:#333;">과목: {info["subject"]} | 학년: {info["grade"]} | 시험일: {info["date"]} | 시간: {info["time_limit"]}</p>')
-            preview_parts.append('</div>')
-
-        for idx, sq in enumerate(st.session_state.exam_selected_questions):
-            qd = sq['question_data']
-            choices_html = ''.join([f'<div style="margin:0.3rem 0;color:#000;">{qd.get(f"choice_{i}", "")}</div>' for i in range(1, 6) if qd.get(f'choice_{i}')])
-            ref_html = f'<div style="background:#f5f5f5;padding:0.75rem;margin:0.5rem 0;border-left:3px solid #333;color:#000;"><strong>[보기]</strong><br/>{qd.get("reference_box", "")}</div>' if qd.get('reference_box') else ''
-            points_html = f' <span style="color:#d93025;">[{qd["points"]}점]</span>' if qd.get('points') else ''
-            preview_parts.append(f'<div style="margin-bottom:1.5rem;padding-bottom:1rem;border-bottom:1px dashed #ccc;">')
-            preview_parts.append(f'<p style="margin:0;color:#000;"><strong>{idx+1}.</strong> {qd.get("q_stem", "")}{points_html}</p>')
-            preview_parts.append(ref_html)
-            preview_parts.append(f'<div style="margin-top:0.5rem;padding-left:1rem;">{choices_html}</div>')
-            preview_parts.append('</div>')
-
-        preview_parts.append('</div>')
-        st.markdown(''.join(preview_parts), unsafe_allow_html=True)
-
-    if pdf_btn and st.session_state.exam_selected_questions:
-        try:
-            info = st.session_state.exam_info
-
-            # ExamPaperConfig 생성
-            if info['layout_type'] == '수능형':
-                config = ExamPaperConfig(
-                    title=info['title'],
-                    subject=info['subject'],
-                    session=info['session'],
-                    form_type=info['form_type'],
-                    layout_type="suneung",
-                )
-            else:
-                config = ExamPaperConfig(
-                    subject=info['subject'],
-                    school_name=info['school_name'],
-                    exam_name=info['exam_name'],
-                    grade=info['grade'],
-                    exam_date=info['date'],
-                    time_limit=info['time_limit'],
-                    layout_type="school",
-                )
-
-            # 선택된 문항의 question_data 리스트 추출
-            selected_q_list = [sq['question_data'] for sq in st.session_state.exam_selected_questions]
-
-            # 관련 passages 수집 (캐시 + 필요시 재로드)
-            all_passages = []
-            seen_file_ids = set(sq['file_id'] for sq in st.session_state.exam_selected_questions)
-            for fid in seen_file_ids:
-                if fid in st.session_state.exam_passages_cache:
-                    all_passages.extend(st.session_state.exam_passages_cache[fid])
-                else:
-                    fdata = load_json_data(fid)
-                    if fdata:
-                        passages_data = fdata.get("passages", [])
-                        st.session_state.exam_passages_cache[fid] = passages_data
-                        all_passages.extend(passages_data)
-
-            # PDF 생성
-            pdf_bytes = generate_exam_pdf(config, selected_q_list, all_passages)
-
-            file_name = f"시험지_{info['subject']}.pdf".replace(' ', '_')
-            st.download_button(
-                label="PDF 다운로드",
-                data=pdf_bytes,
-                file_name=file_name,
-                mime="application/pdf",
-                use_container_width=True
-            )
-            st.success("PDF가 생성되었습니다! 위 버튼을 클릭하여 다운로드하세요.")
-
-        except Exception as e:
-            st.error(f"PDF 생성 중 오류가 발생했습니다: {str(e)}")
-
-    st.markdown('</div>', unsafe_allow_html=True)
 
 
 # =============================================================================

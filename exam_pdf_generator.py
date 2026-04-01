@@ -699,6 +699,57 @@ def build_story(groups, config):
 # 10. 메인 생성 함수
 # =============================================================================
 
+def _build_custom_styles(fonts_cfg):
+    """양식의 fonts 설정으로 동적 스타일 생성"""
+    return {
+        'passage_intro': ParagraphStyle(
+            'cust_passage_intro', fontName=FONT,
+            fontSize=fonts_cfg.get('stem_size', 11), leading=fonts_cfg.get('stem_leading', 16),
+            alignment=TA_LEFT, spaceBefore=6, spaceAfter=4,
+        ),
+        'passage_body': ParagraphStyle(
+            'cust_passage_body', fontName=FONT,
+            fontSize=fonts_cfg.get('passage_size', 10), leading=fonts_cfg.get('passage_leading', 15),
+            alignment=TA_JUSTIFY, firstLineIndent=fonts_cfg.get('passage_indent', 10) if hasattr(fonts_cfg, 'get') else 10,
+            spaceBefore=0, spaceAfter=0,
+        ),
+        'passage_body_no_indent': ParagraphStyle(
+            'cust_passage_body_ni', fontName=FONT,
+            fontSize=fonts_cfg.get('passage_size', 10), leading=fonts_cfg.get('passage_leading', 15),
+            alignment=TA_LEFT, firstLineIndent=0,
+            spaceBefore=0, spaceAfter=0,
+        ),
+        'question_stem': ParagraphStyle(
+            'cust_question_stem', fontName=FONT,
+            fontSize=fonts_cfg.get('stem_size', 11), leading=fonts_cfg.get('stem_leading', 16),
+            alignment=TA_LEFT, spaceBefore=fonts_cfg.get('before_question', 12), spaceAfter=3,
+            leftIndent=0,
+        ),
+        'choice': ParagraphStyle(
+            'cust_choice', fontName=FONT,
+            fontSize=fonts_cfg.get('choice_size', 10), leading=fonts_cfg.get('choice_leading', 14),
+            alignment=TA_LEFT, leftIndent=14,
+            spaceBefore=fonts_cfg.get('choice_gap', 2), spaceAfter=fonts_cfg.get('choice_gap', 2),
+        ),
+        'box_title': ParagraphStyle(
+            'cust_box_title', fontName=FONT,
+            fontSize=fonts_cfg.get('box_title_size', 10), leading=fonts_cfg.get('box_title_size', 10) + 4,
+            alignment=TA_CENTER, spaceBefore=4, spaceAfter=4,
+        ),
+        'box_body': ParagraphStyle(
+            'cust_box_body', fontName=FONT,
+            fontSize=fonts_cfg.get('box_body_size', 9.5), leading=fonts_cfg.get('box_body_size', 9.5) + 4.5,
+            alignment=TA_LEFT, leftIndent=6, rightIndent=6,
+            spaceBefore=3, spaceAfter=3,
+        ),
+        'points': ParagraphStyle(
+            'cust_points', fontName=FONT,
+            fontSize=fonts_cfg.get('choice_size', 10), leading=fonts_cfg.get('choice_leading', 14),
+            alignment=TA_LEFT,
+        ),
+    }
+
+
 def generate_exam_pdf(config, selected_questions, all_passages):
     """
     시험지 PDF를 생성하여 bytes로 반환.
@@ -719,6 +770,68 @@ def generate_exam_pdf(config, selected_questions, all_passages):
 
     doc.build(story)
 
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+def generate_exam_pdf_from_template(template_config, selected_questions, all_passages):
+    """
+    양식 설정(template_config dict)으로 시험지 PDF 생성.
+    template_config는 exam_templates.template_to_config()의 반환값.
+    """
+    # ExamPaperConfig 생성
+    config = ExamPaperConfig(
+        title=template_config.get("title", ""),
+        subject=template_config.get("subject", "국어"),
+        session=template_config.get("session", ""),
+        form_type=template_config.get("form_type", ""),
+        school_name=template_config.get("school_name", ""),
+        exam_name=template_config.get("exam_name", ""),
+        grade=template_config.get("grade", ""),
+        exam_date=template_config.get("exam_date", ""),
+        time_limit=template_config.get("time_limit", ""),
+        layout_type=template_config.get("layout_type", "school"),
+    )
+
+    # 커스텀 마진 적용
+    margins = template_config.get("margins", {})
+    custom_margin_left = margins.get("left", 15) * mm
+    custom_margin_right = margins.get("right", 15) * mm
+    custom_margin_top = margins.get("top", 12) * mm
+    custom_margin_bottom = margins.get("bottom", 10) * mm
+
+    # 커스텀 스타일 생성
+    fonts_cfg = {**template_config.get("fonts", {}), **template_config.get("spacing", {})}
+    custom_styles = _build_custom_styles(fonts_cfg)
+
+    # 단수에 따른 col_width 계산
+    columns = template_config.get("columns", 1)
+    content_w = PAGE_W - custom_margin_left - custom_margin_right
+    if columns == 2:
+        gutter = margins.get("gutter", 6) * mm
+        col_width = (content_w - gutter) / 2
+    else:
+        col_width = content_w
+
+    buffer = io.BytesIO()
+    doc = create_exam_document(buffer, config)
+    groups = group_questions_with_passages(selected_questions, all_passages)
+
+    # 커스텀 스타일 + col_width로 story 생성
+    story = []
+    story.append(NextPageTemplate('NormalPage'))
+    for group in groups:
+        if group['type'] == 'passage_group':
+            story.extend(build_passage_group_flowables(group, col_width, custom_styles))
+        else:
+            for q in group['questions']:
+                result = build_question_block(q, col_width, custom_styles)
+                if isinstance(result, list):
+                    story.extend(result)
+                else:
+                    story.append(result)
+
+    doc.build(story)
     buffer.seek(0)
     return buffer.getvalue()
 
